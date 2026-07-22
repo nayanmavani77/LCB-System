@@ -35,9 +35,12 @@ implementation, so backtest behaviour == live behaviour by construction.
     python3 live.py                                           # real-time paper trading
 
 Backtest configs: `v2-flow` (default: age cap 35h + spread cap $0.90 + flow
-gate), `v2-ea` (no flow gate), `v1` (original, gates off). New data: run
-`scripts/download_data.py`, then `scripts/prep.py` - the backtest window
-extends automatically.
+gate), `v2-ea` (no flow gate), `v1` (original, gates off). New data: drop any
+number of `*tbbo*`/`*ohlcv1m*` DBN files into `Data/` (per-year files are
+fine) and re-run `scripts/prep.py` - contract windows are read from every
+file's metadata, merged across year boundaries, and the backtest date range
+extends automatically. Multi-year prep decodes one TBBO file at a time
+(peak RAM roughly one year, ~2-3 GB).
 
 To trade a real account, implement the small `Broker` interface in
 `lrev/broker.py` for your venue (e.g. IBKR via ib_insync) and pass it to
