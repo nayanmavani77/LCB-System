@@ -104,7 +104,9 @@ def main():
                                              bars.itertuples())])
         print(f"  {tf}: {len(bars)} warmup bars")
 
-    print("subscribing to live TBBO (GC.v.0)... paper trading, Ctrl-C to stop")
+    mode = ("PAPER trading" if args.broker == "paper"
+            else f"LIVE orders -> MT5 {args.mt5_symbol} @ {args.lots} lots")
+    print(f"subscribing to live TBBO (GC.v.0)... {mode}, Ctrl-C to stop")
     client = db.Live(key=api_key)
     client.subscribe(dataset="GLBX.MDP3", schema="tbbo",
                      stype_in="continuous", symbols=["GC.v.0"])

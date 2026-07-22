@@ -23,6 +23,12 @@ class Broker(ABC):
         signals) should apply the DISTANCES (ref_px-sl, tp-ref_px) to their
         own instrument's current price - the futures/spot basis cancels."""
 
+    def on_tick(self, ts: int, bid: float, ask: float):
+        """Called on every tick. Default: no-op. PaperBroker overrides it to
+        simulate SL/TP fills; real-venue adapters (server-side SL/TP) don't
+        need it."""
+
+
 
 @dataclass
 class Position:
