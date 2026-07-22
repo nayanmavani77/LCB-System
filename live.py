@@ -49,14 +49,28 @@ def main():
 
     hist = db.Historical()
     end = pd.Timestamp.utcnow().floor("min") - pd.Timedelta(minutes=10)
-    start = end - pd.Timedelta(days=20)
-    print(f"bootstrapping bars {start} .. {end} ...")
-    data = hist.timeseries.get_range(
-        dataset="GLBX.MDP3", schema="ohlcv-1m",
-        stype_in="continuous", symbols=["GC.v.0"],
-        start=start.isoformat(), end=end.isoformat())
-    m1 = data.to_df()
+    m1 = None
+    for backoff_h in (0, 6, 24, 48):   # historical can lag real time
+        try:
+            e = end - pd.Timedelta(hours=backoff_h)
+            start = e - pd.Timedelta(days=20)
+            print(f"bootstrapping bars {start} .. {e} ...")
+            data = hist.timeseries.get_range(
+                dataset="GLBX.MDP3", schema="ohlcv-1m",
+                stype_in="continuous", symbols=["GC.v.0"],
+                start=start.isoformat(), end=e.isoformat())
+            m1 = data.to_df()
+            if len(m1):
+                break
+        except Exception as exc:
+            print(f"  historical not available yet ({exc}); backing off...")
+    if m1 is None or not len(m1):
+        print("WARNING: no warmup bars available - the engine will build bars "
+              "from live ticks only (signals begin once enough bars form).")
+        m1 = pd.DataFrame()
     for tf, sec in TF_SECONDS.items():
+        if not len(m1):
+            break
         rule = f"{sec // 60}min"
         bars = pd.DataFrame({
             "open": m1["open"].resample(rule).first(),
