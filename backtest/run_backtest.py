@@ -27,8 +27,9 @@ import numpy as np
 import engine as E
 import variants as V
 
-DATA_START = pd.Timestamp("2025-12-28", tz="UTC")
-DATA_END = pd.Timestamp("2026-07-18", tz="UTC")
+# derive available window from the segment table (extends automatically with new data)
+DATA_START = pd.Timestamp(min(b[0] for b in E.SEG_BOUNDS.values()), tz="UTC")
+DATA_END = pd.Timestamp(max(b[1] for b in E.SEG_BOUNDS.values()), tz="UTC")
 ALLOWED_ALL = (("1", "-1"), ("1", "1"), ("-1", "-1"), ("-1", "1"), ("1", "0"), ("-1", "0"))
 COST = 0.15
 

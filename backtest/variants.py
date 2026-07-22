@@ -1,6 +1,7 @@
 """Strategy variants: L-Rev (filtered L-System) and CB-Fade (inverted CB with flow gate)."""
 import sys
-sys.path.insert(0, "/home/claude/lcb/scripts")
+import os
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import numpy as np
 import pandas as pd
 import engine as E

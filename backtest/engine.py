@@ -17,10 +17,18 @@ Fills on TBBO stream (trade + BBO at each trade):
   short exit: SL when ask >= sl (fill max(sl,ask)),  TP when ask <= tp (fill tp)
   SL checked with priority on the same tick.
 """
+import json
+import os
+
 import numpy as np
 import pandas as pd
 
-DATA = "/home/claude/lcb/data"
+_REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+DATA = os.environ.get("LCB_CACHE", os.path.join(_REPO, "data_cache"))
+
+# Segment table (front-month contract windows). prep.py derives this from the
+# DBN metadata and writes data_cache/segments.json; the constants below are
+# the fallback for the original 2025-12-28..2026-07-17 dataset.
 SEGMENTS = ["GCG6", "GCJ6", "GCM6", "GCQ6"]
 SEG_BOUNDS = {
     "GCG6": ("2025-12-28", "2026-01-30"),
@@ -28,6 +36,12 @@ SEG_BOUNDS = {
     "GCM6": ("2026-03-30", "2026-05-29"),
     "GCQ6": ("2026-05-29", "2026-07-18"),
 }
+_seg_json = os.path.join(DATA, "segments.json")
+if os.path.exists(_seg_json):
+    with open(_seg_json) as _f:
+        _segs = json.load(_f)
+    SEGMENTS = [s["symbol"] for s in _segs]
+    SEG_BOUNDS = {s["symbol"]: (s["start"], s["end"]) for s in _segs}
 TF_SEC = {"M15": 900, "H1": 3600, "H4": 14400}
 
 

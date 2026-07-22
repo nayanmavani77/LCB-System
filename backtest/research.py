@@ -1,6 +1,7 @@
 """Generate rich research logs: trades + TBBO features + forward returns + context."""
 import sys
-sys.path.insert(0, "/home/claude/lcb/scripts")
+import os
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import numpy as np
 import pandas as pd
 import engine as E
@@ -67,8 +68,8 @@ def main():
             add_context(tc, seg)
             cb_all += tc
         print(sname, "done: L", len(l_all), "CB", len(cb_all))
-    pd.DataFrame(l_all).to_parquet("/home/claude/lcb/results/l_research.parquet")
-    pd.DataFrame(cb_all).to_parquet("/home/claude/lcb/results/cb_research.parquet")
+    pd.DataFrame(l_all).to_parquet(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "results", "l_research.parquet"))
+    pd.DataFrame(cb_all).to_parquet(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "results", "cb_research.parquet"))
 
 
 if __name__ == "__main__":
