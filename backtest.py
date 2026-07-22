@@ -23,6 +23,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 import pandas as pd
 
+from lrev.cli import add_strategy_args, config_from_args, describe
 from lrev.data import data_bounds, replay_window
 
 CONFIGS = {
@@ -39,6 +40,7 @@ def main():
     ap.add_argument("--config", default="v2-flow", choices=sorted(CONFIGS))
     ap.add_argument("--csv", default=None, help="save the trade list to CSV")
     ap.add_argument("--verbose", action="store_true", help="print every signal/fill")
+    add_strategy_args(ap)
     args = ap.parse_args()
 
     d0, d1 = data_bounds()
@@ -52,7 +54,9 @@ def main():
 
     if args.csv and os.path.exists(args.csv):
         os.remove(args.csv)
-    broker = replay_window(start=t0, end=t1, config=CONFIGS[args.config],
+    cfg = config_from_args(args, base=CONFIGS[args.config])
+    print("strategy:", describe(cfg))
+    broker = replay_window(start=t0, end=t1, config=cfg,
                            trade_log_path=args.csv,
                            log=(print if args.verbose else None))
 

@@ -55,6 +55,8 @@ def main():
     ap.add_argument("--lots", type=float, default=0.01)
     ap.add_argument("--trades-csv", default="paper_trades.csv")
     ap.add_argument("--state-json", default="lrev_state.json")
+    from lrev.cli import add_strategy_args, config_from_args, describe
+    add_strategy_args(ap)
     args = ap.parse_args()
 
     import databento as db
@@ -65,7 +67,9 @@ def main():
         broker = MT5Broker(symbol=args.mt5_symbol, lots=args.lots)
     else:
         broker = PaperBroker(trade_log_path=args.trades_csv)
-    strat = LRevStrategy(broker, config={"use_flow_gate": not args.no_flow_gate})
+    cfg = config_from_args(args, base={"use_flow_gate": not args.no_flow_gate})
+    print("strategy:", describe(cfg))
+    strat = LRevStrategy(broker, config=cfg)
 
     hist = db.Historical(api_key)
     end = pd.Timestamp.utcnow().floor("min") - pd.Timedelta(minutes=10)
