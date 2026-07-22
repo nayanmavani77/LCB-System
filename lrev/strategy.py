@@ -13,8 +13,11 @@ emits orders to a Broker. Rules:
               (M15 1.5 / H1 0.5 / H4 0.5), TP = SL x 2.
   Gate 1    : level pruned if untriggered 35h after it becomes armed.
   Gate 2    : trigger ignored (level consumed) if spread > $0.90 at the trigger tick.
-  Gate 3    : optional TBBO flow gate - trigger taken only if the 30s
-              direction-aligned aggressor imbalance is in [0.0, 0.6].
+  Gate 3    : TBBO flow gate (ON by default) - trigger taken only if the
+              30s direction-aligned aggressor imbalance is in [0.0, 0.6]:
+              real but not climactic flow. Computed live from the same TBBO
+              stream. Disable explicitly with use_flow_gate=False
+              (--no-flow-gate in live.py, --config v2-ea in backtest.py).
   Also      : level pruned when price closes beyond it by $0.01 without a fill,
               or 336h after the swing bar formed.
 
