@@ -67,7 +67,8 @@ def config_from_args(args, base: dict | None = None) -> dict:
 
 def describe(cfg: dict) -> str:
     tfs = ", ".join(f"{tf} SLx{m}" for tf, m in cfg["timeframes"].items())
-    return (f"RR {cfg['rr']} | {tfs} | spread<= {cfg['max_spread']} | "
+    eng = cfg.get("engine_name", "L-Rev")
+    return (f"{eng} | RR {cfg['rr']} | {tfs} | spread<= {cfg['max_spread']} | "
             f"age<= {cfg['order_max_age_h']}h | "
             f"flow [{cfg['flow_lo']},{cfg['flow_hi']}]"
             f"{'' if cfg['use_flow_gate'] else ' (flow gate OFF)'}")

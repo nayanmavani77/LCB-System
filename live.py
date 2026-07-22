@@ -51,6 +51,9 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--no-flow-gate", action="store_true")
     ap.add_argument("--broker", choices=["paper", "mt5"], default="paper")
+    ap.add_argument("--engine", default="lrev", choices=["lrev", "ldef"],
+                    help="lrev = level BREAK engine (validated); "
+                         "ldef = level DEFEND engine (experimental)")
     ap.add_argument("--mt5-symbol", default="XAUUSD")
     ap.add_argument("--lots", type=float, default=0.01)
     ap.add_argument("--trades-csv", default="paper_trades.csv")
@@ -68,8 +71,17 @@ def main():
     else:
         broker = PaperBroker(trade_log_path=args.trades_csv)
     cfg = config_from_args(args, base={"use_flow_gate": not args.no_flow_gate})
+    if args.engine == "ldef":
+        from lrev.defend import DEFEND_CONFIG, LDefStrategy
+        if args.flow_lo is None:
+            cfg["flow_lo"] = DEFEND_CONFIG["flow_lo"]
+        if args.flow_hi is None:
+            cfg["flow_hi"] = DEFEND_CONFIG["flow_hi"]
+        cfg["engine_name"] = "L-Def"
+        strat = LDefStrategy(broker, config=cfg)
+    else:
+        strat = LRevStrategy(broker, config=cfg)
     print("strategy:", describe(cfg))
-    strat = LRevStrategy(broker, config=cfg)
 
     hist = db.Historical(api_key)
     end = pd.Timestamp.utcnow().floor("min") - pd.Timedelta(minutes=10)

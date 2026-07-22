@@ -43,7 +43,7 @@ def seed_warmup(strat: LRevStrategy, sym: str, cutoff_ns: int, cache: str = CACH
 
 def replay_window(start=None, end=None, config: dict | None = None,
                   cache: str = CACHE, trade_log_path=None,
-                  log=None, progress=print):
+                  log=None, progress=print, strategy_cls=None):
     """Replay [start, end) through the engine. Returns the PaperBroker."""
     silent = (lambda *a, **k: None)
     log = log or silent
@@ -66,7 +66,8 @@ def replay_window(start=None, end=None, config: dict | None = None,
         if hi <= lo:
             continue
         sym = seg["symbol"]
-        strat = LRevStrategy(broker, config=config, log=log)
+        cls = strategy_cls or LRevStrategy
+        strat = cls(broker, config=config, log=log)
         seed_warmup(strat, sym, lo, cache)
 
         tb = pd.read_parquet(os.path.join(cache, "seg", f"{sym}_tbbo.parquet"))

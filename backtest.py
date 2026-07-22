@@ -38,6 +38,9 @@ def main():
     ap.add_argument("--start", default=None)
     ap.add_argument("--end", default=None)
     ap.add_argument("--config", default="v2-flow", choices=sorted(CONFIGS))
+    ap.add_argument("--engine", default="lrev", choices=["lrev", "ldef"],
+                    help="lrev = level BREAK engine (validated); "
+                         "ldef = level DEFEND engine (experimental, lrev/defend.py)")
     ap.add_argument("--csv", default=None, help="save the trade list to CSV")
     ap.add_argument("--verbose", action="store_true", help="print every signal/fill")
     add_strategy_args(ap)
@@ -55,10 +58,21 @@ def main():
     if args.csv and os.path.exists(args.csv):
         os.remove(args.csv)
     cfg = config_from_args(args, base=CONFIGS[args.config])
+    strategy_cls = None
+    if args.engine == "ldef":
+        from lrev.defend import DEFEND_CONFIG, LDefStrategy
+        strategy_cls = LDefStrategy
+        # defend flow-band defaults unless user overrode them
+        if args.flow_lo is None:
+            cfg["flow_lo"] = DEFEND_CONFIG["flow_lo"]
+        if args.flow_hi is None:
+            cfg["flow_hi"] = DEFEND_CONFIG["flow_hi"]
+        cfg["engine_name"] = "L-Def"
     print("strategy:", describe(cfg))
     broker = replay_window(start=t0, end=t1, config=cfg,
                            trade_log_path=args.csv,
-                           log=(print if args.verbose else None))
+                           log=(print if args.verbose else None),
+                           strategy_cls=strategy_cls)
 
     from lrev.report import print_report
     print_report(broker, title=f"BACKTEST RESULT  [{args.config}]  "
