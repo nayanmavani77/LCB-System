@@ -59,7 +59,8 @@ class PaperBroker(Broker):
             with open(self.path, "w", newline="") as f:
                 csv.writer(f).writerow(
                     ["ts_open", "ts_close", "dir", "qty", "entry", "exit",
-                     "sl", "tp", "reason", "pnl_pts", "pnl_usd", "tag"])
+                     "sl", "tp", "reason", "pnl_pts", "pnl_gross_pts",
+                     "pnl_usd", "tag"])
 
     # ------------------------------------------------------------- interface
     def market_order(self, ts, direction, qty, sl, tp, tag, ref_px=None):
@@ -91,10 +92,12 @@ class PaperBroker(Broker):
 
     def _close(self, pos, ts, px, reason):
         self.positions.remove(pos)
-        pnl_pts = (px - pos.entry) * pos.direction - self.cost_pts
+        pnl_gross = (px - pos.entry) * pos.direction
+        pnl_pts = pnl_gross - self.cost_pts
         rec = dict(ts_open=pos.ts_open, ts_close=ts, dir=pos.direction,
                    qty=pos.qty, entry=pos.entry, exit=px, sl=pos.sl, tp=pos.tp,
                    reason=reason, pnl_pts=round(pnl_pts, 4),
+                   pnl_gross_pts=round(pnl_gross, 4),
                    pnl_usd=round(pnl_pts * self.point_value * pos.qty, 2),
                    tag=pos.tag)
         self.closed.append(rec)

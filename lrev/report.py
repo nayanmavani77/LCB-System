@@ -27,8 +27,18 @@ def print_report(broker, title="BACKTEST RESULT", point_value=100.0):
     r = (pts / risk.replace(0, float("nan"))).dropna()
 
     days = max(1e-9, (df.dt.iloc[-1] - df.dt.iloc[0]).total_seconds() / 86400)
+    cost_pts = getattr(broker, "cost_pts", 0.0)
+    if "pnl_gross_pts" in df.columns:
+        gross = df["pnl_gross_pts"]
+    else:
+        gross = pts + cost_pts
+    total_cost = gross.sum() - pts.sum()
     print(f"  period          : {df.dt.iloc[0].date()} .. {df.dt.iloc[-1].date()}  ({days:.0f} days)")
     print(f"  trades          : {len(df)}   ({len(df)/max(days/30.4,1e-9):.0f}/month)")
+    print(f"  gross P&L       : {gross.sum():+,.1f} pts   (${gross.sum()*point_value:+,.0f})   [before costs]")
+    print(f"  costs           : -{total_cost:,.1f} pts   (${total_cost*point_value:,.0f})   "
+          f"[{len(df)} trades x {cost_pts} pts/round turn: commission+slippage;"
+          f" quoted spread additionally paid inside fill prices]")
     print(f"  net P&L         : {pts.sum():+,.1f} pts   (${pts.sum()*point_value:+,.0f} per contract)")
     print(f"  avg / trade     : {pts.mean():+.2f} pts   ({r.mean():+.3f} R)")
     print(f"  win rate        : {100*(pts>0).mean():.1f}%")
