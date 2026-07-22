@@ -23,6 +23,10 @@ paper_trades.csv for a couple of weeks before any real account.
 """
 from __future__ import annotations
 
+import csv
+import os
+import time
+
 from .broker import Broker
 
 MAGIC = 26031604  # matches the old EA's L-System magic range
@@ -30,13 +34,20 @@ MAGIC = 26031604  # matches the old EA's L-System magic range
 
 class MT5Broker(Broker):
     def __init__(self, symbol="XAUUSD", lots=0.01, deviation_points=30,
-                 log=print):
+                 log=print, signal_log_path="mt5_signals.csv"):
         import MetaTrader5 as mt5  # noqa: N813 (Windows-only package)
         self.mt5 = mt5
         self.symbol = symbol
         self.lots = lots
         self.deviation = deviation_points
         self.log = log
+        self.signal_log_path = signal_log_path
+        if signal_log_path and not os.path.exists(signal_log_path):
+            with open(signal_log_path, "w", newline="") as f:
+                csv.writer(f).writerow(
+                    ["time_utc", "signal", "symbol", "lots", "fill_price",
+                     "sl", "tp", "gc_ref_px", "gc_sl", "gc_tp",
+                     "status", "tag"])
 
         # Optional explicit login from config.py (MT5_LOGIN/PASSWORD/SERVER).
         # If absent, attach to whatever account the running terminal has open.
@@ -112,13 +123,22 @@ class MT5Broker(Broker):
             # retry once with FOK filling (broker-dependent)
             request["type_filling"] = mt5.ORDER_FILLING_FOK
             result = mt5.order_send(request)
-        if result.retcode == mt5.TRADE_RETCODE_DONE:
+        ok = result.retcode == mt5.TRADE_RETCODE_DONE
+        if ok:
             self.log(f"MT5 {'BUY' if direction > 0 else 'SELL'} {self.lots} "
                      f"{self.symbol} @ {result.price:.2f} SL {sl_x} TP {tp_x} "
                      f"[{tag}]")
         else:
             self.log(f"MT5 order FAILED retcode={result.retcode} "
                      f"comment={result.comment} [{tag}]")
+        if self.signal_log_path:
+            with open(self.signal_log_path, "a", newline="") as f:
+                csv.writer(f).writerow(
+                    [time.strftime("%Y-%m-%d %H:%M:%S", time.gmtime()),
+                     "BUY" if direction > 0 else "SELL", self.symbol,
+                     self.lots, round(result.price, 2) if ok else "",
+                     sl_x, tp_x, round(ref_px, 2), round(sl, 2), round(tp, 2),
+                     "FILLED" if ok else f"FAILED:{result.retcode}", tag])
 
     def shutdown(self):
         self.mt5.shutdown()
