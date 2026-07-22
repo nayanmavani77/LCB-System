@@ -110,6 +110,9 @@ def main():
     client = db.Live(key=api_key)
     client.subscribe(dataset="GLBX.MDP3", schema="tbbo",
                      stype_in="continuous", symbols=["GC.v.0"])
+    import time as _time
+    n_ticks = 0
+    last_beat = _time.time()
     try:
         for rec in client:
             if not hasattr(rec, "price"):
@@ -119,6 +122,14 @@ def main():
             px = rec.price / 1e9
             broker.on_tick(rec.ts_recv, bid, ask)
             strat.on_tick(rec.ts_recv, px, rec.size, rec.side, bid, ask)
+            n_ticks += 1
+            now = _time.time()
+            if now - last_beat >= 60:
+                print(f"[heartbeat] {_time.strftime('%H:%M:%S UTC', _time.gmtime())} | "
+                      f"{n_ticks:,} ticks so far | GC {bid:.2f}/{ask:.2f} | "
+                      f"flow {strat.flow.imbalance():+.2f} | "
+                      f"{len(strat.levels)} levels armed")
+                last_beat = now
     except KeyboardInterrupt:
         pass
     finally:
