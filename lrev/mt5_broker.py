@@ -87,11 +87,28 @@ class MT5Broker(Broker):
         self.log(f"MT5 connected: account {acct.login} ({acct.server}), "
                  f"executing {symbol} @ {lots} lots per signal")
 
+    def _log_row(self, ts, direction, tag, ref_px, sl, tp, sl_dist, tp_dist,
+                 bid="", ask="", fill="", sl_x="", tp_x="", status=""):
+        if not self.signal_log_path:
+            return
+        gc_time = time.strftime("%Y-%m-%d %H:%M:%S",
+                                time.gmtime(ts / 1e9)) if ts else ""
+        with open(self.signal_log_path, "a", newline="") as f:
+            csv.writer(f).writerow([
+                gc_time, "BUY" if direction > 0 else "SELL", tag,
+                round(ref_px, 2), round(sl, 2), round(tp, 2),
+                round(sl_dist, 2), round(tp_dist, 2),
+                time.strftime("%Y-%m-%d %H:%M:%S", time.gmtime()),
+                self.symbol, self.lots, bid, ask, fill, sl_x, tp_x, status])
+
     def market_order(self, ts, direction, qty, sl, tp, tag, ref_px=None):
         mt5 = self.mt5
         tick = mt5.symbol_info_tick(self.symbol)
         if tick is None:
             self.log(f"MT5: no tick for {self.symbol}, signal dropped [{tag}]")
+            _ref = ref_px if ref_px is not None else (sl + tp) / 2.0
+            self._log_row(ts, direction, tag, _ref, sl, tp,
+                          abs(_ref - sl), abs(tp - _ref), status="NO_TICK")
             return
         info = mt5.symbol_info(self.symbol)
         digits = info.digits
@@ -130,6 +147,9 @@ class MT5Broker(Broker):
         result = mt5.order_send(request)
         if result is None:
             self.log(f"MT5 order_send returned None: {mt5.last_error()} [{tag}]")
+            self._log_row(ts, direction, tag, ref_px, sl, tp, sl_dist, tp_dist,
+                          round(tick.bid, 2), round(tick.ask, 2),
+                          sl_x=sl_x, tp_x=tp_x, status="SEND_ERROR")
             return
         if result.retcode != mt5.TRADE_RETCODE_DONE:
             # retry once with FOK filling (broker-dependent)
@@ -143,23 +163,10 @@ class MT5Broker(Broker):
         else:
             self.log(f"MT5 order FAILED retcode={result.retcode} "
                      f"comment={result.comment} [{tag}]")
-        if self.signal_log_path:
-            gc_time = time.strftime("%Y-%m-%d %H:%M:%S",
-                                    time.gmtime(ts / 1e9)) if ts else ""
-            with open(self.signal_log_path, "a", newline="") as f:
-                csv.writer(f).writerow([
-                    gc_time,
-                    "BUY" if direction > 0 else "SELL",
-                    tag,
-                    round(ref_px, 2), round(sl, 2), round(tp, 2),
-                    round(sl_dist, 2), round(tp_dist, 2),
-                    time.strftime("%Y-%m-%d %H:%M:%S", time.gmtime()),
-                    self.symbol, self.lots,
-                    round(tick.bid, 2), round(tick.ask, 2),
-                    round(result.price, 2) if ok else "",
-                    sl_x, tp_x,
-                    "FILLED" if ok else f"FAILED:{result.retcode}",
-                ])
+        self._log_row(ts, direction, tag, ref_px, sl, tp, sl_dist, tp_dist,
+                      round(tick.bid, 2), round(tick.ask, 2),
+                      round(result.price, 2) if ok else "", sl_x, tp_x,
+                      "FILLED" if ok else f"FAILED:{result.retcode}")
 
     def shutdown(self):
         self.mt5.shutdown()
