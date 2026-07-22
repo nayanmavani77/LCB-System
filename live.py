@@ -57,6 +57,8 @@ def main():
     ap.add_argument("--mt5-symbol", default="XAUUSD")
     ap.add_argument("--lots", type=float, default=0.01)
     ap.add_argument("--trades-csv", default="paper_trades.csv")
+    ap.add_argument("--cost", type=float, default=0.4,
+                    help="paper-mode commission+slippage per round turn (points)")
     ap.add_argument("--state-json", default="lrev_state.json")
     from lrev.cli import add_strategy_args, config_from_args, describe
     add_strategy_args(ap)
@@ -69,7 +71,8 @@ def main():
         from lrev.mt5_broker import MT5Broker
         broker = MT5Broker(symbol=args.mt5_symbol, lots=args.lots)
     else:
-        broker = PaperBroker(trade_log_path=args.trades_csv)
+        broker = PaperBroker(trade_log_path=args.trades_csv,
+                             cost_pts=args.cost)
     cfg = config_from_args(args, base={"use_flow_gate": not args.no_flow_gate})
     if args.engine == "ldef":
         from lrev.defend import DEFEND_CONFIG, LDefStrategy

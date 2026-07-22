@@ -46,7 +46,7 @@ class PaperBroker(Broker):
     logs completed trades to CSV. Point value defaults to GC ($100/pt)."""
 
     def __init__(self, trade_log_path="paper_trades.csv", point_value=100.0,
-                 cost_pts=0.15, log=print):
+                 cost_pts=0.4, log=print):
         self.positions: list[Position] = []
         self.closed = []
         self.bid = float("nan")

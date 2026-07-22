@@ -43,7 +43,8 @@ def seed_warmup(strat: LRevStrategy, sym: str, cutoff_ns: int, cache: str = CACH
 
 def replay_window(start=None, end=None, config: dict | None = None,
                   cache: str = CACHE, trade_log_path=None,
-                  log=None, progress=print, strategy_cls=None):
+                  log=None, progress=print, strategy_cls=None,
+                  cost_pts=0.4):
     """Replay [start, end) through the engine. Returns the PaperBroker."""
     silent = (lambda *a, **k: None)
     log = log or silent
@@ -57,7 +58,8 @@ def replay_window(start=None, end=None, config: dict | None = None,
     t0 = _ns(start, 0)
     t1 = _ns(end, 2**63 - 1)
 
-    broker = PaperBroker(trade_log_path=trade_log_path, log=log)
+    broker = PaperBroker(trade_log_path=trade_log_path, log=log,
+                         cost_pts=cost_pts)
     total = 0
     for seg in segs:
         seg_t0 = pd.Timestamp(seg["start"], tz="UTC").value

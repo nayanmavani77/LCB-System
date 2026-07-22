@@ -42,6 +42,10 @@ def main():
                     help="lrev = level BREAK engine (validated); "
                          "ldef = level DEFEND engine (experimental, lrev/defend.py)")
     ap.add_argument("--csv", default=None, help="save the trade list to CSV")
+    ap.add_argument("--cost", type=float, default=0.4,
+                    help="commission+slippage per round turn in points "
+                         "(default 0.4; quoted spread is separately embedded "
+                         "in fill prices)")
     ap.add_argument("--verbose", action="store_true", help="print every signal/fill")
     add_strategy_args(ap)
     args = ap.parse_args()
@@ -72,7 +76,7 @@ def main():
     broker = replay_window(start=t0, end=t1, config=cfg,
                            trade_log_path=args.csv,
                            log=(print if args.verbose else None),
-                           strategy_cls=strategy_cls)
+                           strategy_cls=strategy_cls, cost_pts=args.cost)
 
     from lrev.report import print_report
     print_report(broker, title=f"BACKTEST RESULT  [{args.config}]  "
