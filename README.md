@@ -6,7 +6,8 @@ results: [`docs/TBBO_Research_Report.md`](docs/TBBO_Research_Report.md).
 
 ## Layout
 
-    ea/         MT5 expert advisors
+    live/       event-driven Python engine: replay / live paper trading / broker interface
+    ea/         MT5 expert advisors (reference; not needed for the Python workflow)
                   LCB-System_v1.mq5          original combined EA (reference)
                   L-Rev-System_TBBO_v2.mq5   v2 strategy (use this one)
                   tbbo_flow_bridge.py        live order-flow bridge for the optional flow gate
@@ -28,6 +29,25 @@ are clamped automatically. Add `--csv trades.csv` to export the trade list.
 New data: drop updated `*ohlcv1m*.dbn.zst` and `*tbbo*.dbn.zst` files into
 `Data/` and re-run `prep.py` - the contract windows are read from the DBN
 metadata, so the backtest window extends automatically.
+
+## Run it live (paper trading) - no MetaTrader needed
+
+The same strategy exists as an event-driven Python engine in `live/`:
+
+    python3 live/run_live.py --mode replay --start 2026-06-01 --end 2026-07-17
+    python3 live/run_live.py --mode live          # real-time Databento TBBO, paper fills
+
+`--mode live` needs a live-enabled DATABENTO_API_KEY: it bootstraps warmup
+bars from historical, streams real-time TBBO for GC.v.0, applies all v2
+gates (age cap, spread cap, flow gate) and simulates fills with PaperBroker,
+logging trades to `paper_trades.csv`. To trade a real account later,
+implement the small `Broker` interface in `live/broker.py` for your venue
+(e.g. IBKR via ib_insync) - the strategy code does not change.
+`live/download_data.py` extends `Data/` with fresh history for backtests.
+
+Replay validation: the event engine reproduces the vectorized backtest on the
+out-of-sample window (134 trades, +165 pts, PF 1.16 vs 150 / +189 / PF 1.16;
+the small gap is warmup handling at the contract-roll boundary).
 
 ## Headline results (Dec 2025 - Jul 2026, 1 contract, net of costs)
 
