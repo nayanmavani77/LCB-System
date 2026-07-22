@@ -31,6 +31,7 @@ Desktop.ini
 
 # ---- secrets ----
 config.py
-paper_trades.csv
+
+# ---- generated outputs (backtest/live logs) ----
+*.csv
 lrev_state.json
-mt5_signals.csv
