@@ -266,7 +266,7 @@ class LRevStrategy:
             tp = px - tp_d if lv.is_low else px + tp_d
             self.broker.market_order(
                 ts=self.now, direction=direction, qty=self.cfg["qty"],
-                sl=sl, tp=tp,
+                sl=sl, tp=tp, ref_px=px,
                 tag=f"L-Rev|{lv.tf}|{'low' if lv.is_low else 'high'}@{lv.price:.2f}")
 
     # ---------------------------------------------------------------- pruning

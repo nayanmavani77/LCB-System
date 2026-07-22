@@ -16,8 +16,12 @@ from dataclasses import dataclass
 class Broker(ABC):
     @abstractmethod
     def market_order(self, ts: int, direction: int, qty: float,
-                     sl: float, tp: float, tag: str):
-        """direction: +1 buy / -1 sell. sl/tp are absolute prices."""
+                     sl: float, tp: float, tag: str, ref_px: float = None):
+        """direction: +1 buy / -1 sell. sl/tp are absolute prices on the
+        SIGNAL instrument; ref_px is the engine's trigger price there.
+        Adapters executing on a different instrument (e.g. XAUUSD from GC
+        signals) should apply the DISTANCES (ref_px-sl, tp-ref_px) to their
+        own instrument's current price - the futures/spot basis cancels."""
 
 
 @dataclass
@@ -52,7 +56,7 @@ class PaperBroker(Broker):
                      "sl", "tp", "reason", "pnl_pts", "pnl_usd", "tag"])
 
     # ------------------------------------------------------------- interface
-    def market_order(self, ts, direction, qty, sl, tp, tag):
+    def market_order(self, ts, direction, qty, sl, tp, tag, ref_px=None):
         px = self.ask if direction > 0 else self.bid
         pos = Position(ts, direction, qty, px, sl, tp, tag)
         self.positions.append(pos)

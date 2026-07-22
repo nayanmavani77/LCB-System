@@ -1,8 +1,17 @@
 """Live runner - executes the EXACT same engine (lrev/) that the backtest uses.
 
-    export DATABENTO_API_KEY=db-XXXX
-    python3 live.py                    # paper trading on real-time TBBO
-    python3 live.py --no-flow-gate     # v2-ea config
+Signals are generated from the GC futures TBBO stream (Databento). Execution
+is pluggable:
+
+    python3 live.py                                          # paper fills (default)
+    python3 live.py --broker mt5 --mt5-symbol XAUUSD --lots 0.01
+                                                             # real/demo MT5 account
+    python3 live.py --no-flow-gate                           # v2-ea config
+
+With --broker mt5, GC signal prices are translated to XAUUSD as SL/TP
+DISTANCES re-anchored on the live XAUUSD quote (the futures/spot basis
+cancels out). Test on a DEMO MT5 account first. Requires Windows,
+`pip install MetaTrader5`, and the MT5 terminal running and logged in.
 
 Bootstraps warmup bars from Databento historical, then streams real-time
 GC.v.0 TBBO. Fills are simulated by PaperBroker until you pass a real
@@ -22,13 +31,20 @@ from lrev import Bar, LRevStrategy, PaperBroker, TF_SECONDS
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--no-flow-gate", action="store_true")
+    ap.add_argument("--broker", choices=["paper", "mt5"], default="paper")
+    ap.add_argument("--mt5-symbol", default="XAUUSD")
+    ap.add_argument("--lots", type=float, default=0.01)
     ap.add_argument("--trades-csv", default="paper_trades.csv")
     ap.add_argument("--state-json", default="lrev_state.json")
     args = ap.parse_args()
 
     import databento as db
 
-    broker = PaperBroker(trade_log_path=args.trades_csv)
+    if args.broker == "mt5":
+        from lrev.mt5_broker import MT5Broker
+        broker = MT5Broker(symbol=args.mt5_symbol, lots=args.lots)
+    else:
+        broker = PaperBroker(trade_log_path=args.trades_csv)
     strat = LRevStrategy(broker, config={"use_flow_gate": not args.no_flow_gate})
 
     hist = db.Historical()
@@ -71,8 +87,13 @@ def main():
         pass
     finally:
         strat.save_state(args.state_json)
-        from lrev.report import print_report
-        print_report(broker, title="LIVE PAPER SESSION RESULT")
+        if args.broker == "paper":
+            from lrev.report import print_report
+            print_report(broker, title="LIVE PAPER SESSION RESULT")
+        else:
+            broker.shutdown()
+            print("MT5 disconnected; open positions remain protected by "
+                  "their server-side SL/TP.")
         print("state saved:", args.state_json)
 
 
