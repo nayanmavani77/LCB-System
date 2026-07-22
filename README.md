@@ -26,6 +26,8 @@ implementation, so backtest behaviour == live behaviour by construction.
     Data/            raw Databento DBN files (gitignored)
     data_cache/      parquet cache built by scripts/prep.py (gitignored)
 
+**All commands in one place: [`COMMANDS.md`](COMMANDS.md)**
+
 ## Quick start
 
     pip install databento pandas pyarrow zstandard numpy
