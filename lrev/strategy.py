@@ -1,7 +1,9 @@
-"""L-Rev v2 strategy as an event-driven Python engine (no MetaTrader needed).
+"""L-Rev v2 strategy engine - THE single source of truth.
 
-Consumes a stream of TBBO ticks (trade + best bid/offer) and emits orders to a
-Broker. Identical rules to the validated backtest configuration:
+Both the backtest (tick replay over historical TBBO) and live trading
+(real-time TBBO stream) execute this exact class; there is no separate
+backtest implementation. Consumes TBBO ticks (trade + best bid/offer) and
+emits orders to a Broker. Rules:
 
   Levels    : fractal swing highs/lows, 8 bars each side, on M15/H1/H4,
               confirmed 9 bars after the swing bar.
@@ -141,7 +143,8 @@ class LRevStrategy:
         self.bid = float("nan")
         self.ask = float("nan")
         self.now = 0
-        self._seen: set = set()  # (tf, round(price,2), is_low) dedup like the EA
+        self._max_low = float("-inf")   # fast-path trigger bounds
+        self._min_high = float("inf")
 
     # ---------------------------------------------------------------- seeding
     def seed_bars(self, tf: str, bars):
@@ -156,12 +159,16 @@ class LRevStrategy:
         sign = 1 if side == "B" else (-1 if side == "A" else 0)
         self.flow.on_trade(ts, size, sign)
 
+        bar_closed = False
         for tf, bb in self.builders.items():
             if bb.on_trade(ts, price, size):
                 self._on_bar_close(tf)
+                bar_closed = True
 
-        self._check_triggers()
-        self._prune()
+        if bid <= self._max_low or ask >= self._min_high:
+            self._check_triggers()
+        if bar_closed:
+            self._prune()
 
     # ---------------------------------------------------------------- swings
     def _on_bar_close(self, tf: str):
@@ -194,11 +201,20 @@ class LRevStrategy:
             trs.append(max(cur.h - cur.l, abs(cur.h - prev.c), abs(cur.l - prev.c)))
         return median(trs)
 
+    def _level_known(self, tf, price, is_low):
+        # EA parity (L_LevelKnown): dedup against CURRENTLY ACTIVE levels only
+        return any(lv.tf == tf and lv.is_low == is_low and
+                   abs(lv.price - price) < 0.01 for lv in self.levels)
+
+    def _rebounds(self):
+        self._max_low = max((lv.trigger_px for lv in self.levels if lv.is_low),
+                            default=float("-inf"))
+        self._min_high = min((lv.trigger_px for lv in self.levels if not lv.is_low),
+                             default=float("inf"))
+
     def _add_level(self, tf, price, is_low, formed_ns, spread):
-        key = (tf, round(price, 2), is_low)
-        if key in self._seen:
+        if self._level_known(tf, price, is_low):
             return
-        self._seen.add(key)
         # already broken?
         if is_low and self.bid < price - 0.01:
             return
@@ -216,6 +232,7 @@ class LRevStrategy:
                    sl_dist=m * self.cfg["timeframes"][tf],
                    armed_ns=self.now)
         self.levels.append(lv)
+        self._rebounds()
         self.log(f"[{tf}] level {'LOW' if is_low else 'HIGH'} {price:.2f} "
                  f"(SLdist {lv.sl_dist:.2f})")
 
@@ -230,6 +247,7 @@ class LRevStrategy:
             if not hit:
                 continue
             self.levels.remove(lv)      # one shot per level, taken or not
+            self._rebounds()
             if self.cfg["max_spread"] > 0 and spread > self.cfg["max_spread"]:
                 self.log(f"[{lv.tf}] trigger {lv.price:.2f} SKIPPED: spread {spread:.2f}")
                 continue
@@ -268,7 +286,9 @@ class LRevStrategy:
             )
             if not dead:
                 keep.append(lv)
-        self.levels = keep
+        if len(keep) != len(self.levels):
+            self.levels = keep
+            self._rebounds()
 
     # ---------------------------------------------------------------- state
     def snapshot(self) -> dict:

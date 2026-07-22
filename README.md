@@ -1,61 +1,63 @@
 # LCB-System
 
-Gold futures (GC) trading system research: the original L/CB EA, and the
-TBBO-powered **L-Rev v2** strategy derived from it. Full methodology and
-results: [`docs/TBBO_Research_Report.md`](docs/TBBO_Research_Report.md).
+Gold futures (GC) trading system: **L-Rev v2**, a swing-level breakout strategy
+derived from the original L/CB EA through TBBO (tick + order-flow) research.
+Full methodology and findings: [`docs/TBBO_Research_Report.md`](docs/TBBO_Research_Report.md).
+
+**One engine, one source of truth:** the strategy exists exactly once, in
+`lrev/strategy.py`. The backtest replays historical ticks through it; live
+trading streams real-time ticks through it. There is no separate backtest
+implementation, so backtest behaviour == live behaviour by construction.
 
 ## Layout
 
-    live/       event-driven Python engine: replay / live paper trading / broker interface
-    ea/         MT5 expert advisors (reference; not needed for the Python workflow)
-                  LCB-System_v1.mq5          original combined EA (reference)
-                  L-Rev-System_TBBO_v2.mq5   v2 strategy (use this one)
-                  tbbo_flow_bridge.py        live order-flow bridge for the optional flow gate
-    backtest/   Python backtest engine (tick-accurate fills on TBBO data)
-    results/    trade logs of the final configurations
-    docs/       research report + equity curve
-    Data/       raw Databento DBN files (gitignored - too large for git)
-    data_cache/ parquet cache built by prep.py (gitignored)
+    lrev/            THE strategy engine (single source of truth)
+      strategy.py      L-Rev v2 rules: levels, gates, triggers, exits
+      broker.py        Broker interface + PaperBroker simulator
+      data.py          cache loading + tick replay
+    backtest.py      backtest runner (tick replay through lrev/)
+    live.py          live runner (real-time Databento TBBO through lrev/)
+    scripts/         prep.py (DBN -> cache), download_data.py (extend Data/)
+    results/         trade logs from the original research study
+    docs/            research report + equity curve
+    research/        ARCHIVE: vectorized study code that produced the report
+                     numbers - kept for reproducibility, not for trading
+    ea/              ARCHIVE: MT5 versions (v1 original + v2 port), unused
+    Data/            raw Databento DBN files (gitignored)
+    data_cache/      parquet cache built by scripts/prep.py (gitignored)
 
-## Reproduce the backtest
+## Quick start
 
     pip install databento pandas pyarrow zstandard numpy
-    python3 backtest/prep.py          # decode DBN -> data_cache/ (run once per new dataset)
-    python3 backtest/run_backtest.py --start 2026-04-01 --end 2026-07-17 --config v2-flow
+    python3 scripts/prep.py                                   # build cache (once per dataset)
+    python3 backtest.py --start 2026-04-01 --end 2026-07-17   # any date window
+    python3 backtest.py --config v2-ea --csv trades.csv       # export trades
+    python3 live.py                                           # real-time paper trading
 
-Configs: `v1-l`, `v1-cb`, `v2-ea`, `v2-flow`. Dates outside the available data
-are clamped automatically. Add `--csv trades.csv` to export the trade list.
+Backtest configs: `v2-flow` (default: age cap 35h + spread cap $0.90 + flow
+gate), `v2-ea` (no flow gate), `v1` (original, gates off). New data: run
+`scripts/download_data.py`, then `scripts/prep.py` - the backtest window
+extends automatically.
 
-New data: drop updated `*ohlcv1m*.dbn.zst` and `*tbbo*.dbn.zst` files into
-`Data/` and re-run `prep.py` - the contract windows are read from the DBN
-metadata, so the backtest window extends automatically.
+To trade a real account, implement the small `Broker` interface in
+`lrev/broker.py` for your venue (e.g. IBKR via ib_insync) and pass it to
+`LRevStrategy` in place of `PaperBroker`. The strategy code does not change.
 
-## Run it live (paper trading) - no MetaTrader needed
+## Results - unified engine, Dec 28 2025 - Jul 17 2026
 
-The same strategy exists as an event-driven Python engine in `live/`:
+Net of quoted spread at fill + 0.15 pts/round-turn costs, 1 contract, GC = $100/pt.
+Rules were selected on Dec-May data only; May 29 - Jul 17 was a held-out
+validation window (see the report).
 
-    python3 live/run_live.py --mode replay --start 2026-06-01 --end 2026-07-17
-    python3 live/run_live.py --mode live          # real-time Databento TBBO, paper fills
+| Config | Trades | P&L (pts) | PF | Max DD | Held-out window |
+|---|---|---|---|---|---|
+| v1 (original L-System) | ~1,150 | -424 | 0.97 | 1,433 | - |
+| v2-ea | 688 | +1,059 | 1.15 | 502 | +110 pts / PF 1.07 |
+| v2-flow | 545 | +1,457 | 1.27 | 386 | +134 pts / PF 1.12 |
 
-`--mode live` needs a live-enabled DATABENTO_API_KEY: it bootstraps warmup
-bars from historical, streams real-time TBBO for GC.v.0, applies all v2
-gates (age cap, spread cap, flow gate) and simulates fills with PaperBroker,
-logging trades to `paper_trades.csv`. To trade a real account later,
-implement the small `Broker` interface in `live/broker.py` for your venue
-(e.g. IBKR via ib_insync) - the strategy code does not change.
-`live/download_data.py` extends `Data/` with fresh history for backtests.
+(The research report's tables show the original study numbers from the
+archived vectorized code; small differences vs the unified engine come from
+bar construction details. The unified engine is authoritative going forward.)
 
-Replay validation: the event engine reproduces the vectorized backtest on the
-out-of-sample window (134 trades, +165 pts, PF 1.16 vs 150 / +189 / PF 1.16;
-the small gap is warmup handling at the contract-roll boundary).
-
-## Headline results (Dec 2025 - Jul 2026, 1 contract, net of costs)
-
-| Config | Trades | P&L (pts) | PF | OOS (GCQ6) |
-|---|---|---|---|---|
-| v1 CB-System | 1,266 | -3,094 | 0.79 | - |
-| v1 L-System | 1,150 | -424 | 0.97 | - |
-| v2 EA-only | 694 | +1,122 | 1.16 | +127 pts |
-| v2 + flow gate | 546 | +1,625 | 1.31 | +189 pts |
-
-Not financial advice; see the report's caveats section.
+Not financial advice. Six months of a trending gold market is a regime, not
+a lifetime - re-validate as data accrues and size conservatively.
