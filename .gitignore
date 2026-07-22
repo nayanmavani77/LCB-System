@@ -28,3 +28,8 @@ Desktop.ini
 *.swp
 .idea/
 .vscode/
+
+# ---- secrets ----
+config.py
+paper_trades.csv
+lrev_state.json

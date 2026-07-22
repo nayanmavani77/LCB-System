@@ -28,6 +28,25 @@ import pandas as pd
 from lrev import Bar, LRevStrategy, PaperBroker, TF_SECONDS
 
 
+def get_api_key():
+    """Databento key: config.py (DATABENTO_API_KEY = "db-...") wins,
+    else the DATABENTO_API_KEY environment variable."""
+    try:
+        import config
+        key = getattr(config, "DATABENTO_API_KEY", "") or ""
+        if key.startswith("db-"):
+            return key
+    except ImportError:
+        pass
+    key = os.environ.get("DATABENTO_API_KEY", "")
+    if not key.startswith("db-"):
+        raise SystemExit(
+            "No Databento API key found.\n"
+            "Either copy config.example.py to config.py and paste your key there,\n"
+            "or set the DATABENTO_API_KEY environment variable.")
+    return key
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--no-flow-gate", action="store_true")
@@ -40,6 +59,7 @@ def main():
 
     import databento as db
 
+    api_key = get_api_key()
     if args.broker == "mt5":
         from lrev.mt5_broker import MT5Broker
         broker = MT5Broker(symbol=args.mt5_symbol, lots=args.lots)
@@ -47,7 +67,7 @@ def main():
         broker = PaperBroker(trade_log_path=args.trades_csv)
     strat = LRevStrategy(broker, config={"use_flow_gate": not args.no_flow_gate})
 
-    hist = db.Historical()
+    hist = db.Historical(api_key)
     end = pd.Timestamp.utcnow().floor("min") - pd.Timedelta(minutes=10)
     m1 = None
     for backoff_h in (0, 6, 24, 48):   # historical can lag real time
@@ -85,7 +105,7 @@ def main():
         print(f"  {tf}: {len(bars)} warmup bars")
 
     print("subscribing to live TBBO (GC.v.0)... paper trading, Ctrl-C to stop")
-    client = db.Live()
+    client = db.Live(key=api_key)
     client.subscribe(dataset="GLBX.MDP3", schema="tbbo",
                      stype_in="continuous", symbols=["GC.v.0"])
     try:
