@@ -38,7 +38,22 @@ class MT5Broker(Broker):
         self.deviation = deviation_points
         self.log = log
 
-        if not mt5.initialize():
+        # Optional explicit login from config.py (MT5_LOGIN/PASSWORD/SERVER).
+        # If absent, attach to whatever account the running terminal has open.
+        login = password = server = None
+        try:
+            import config
+            login = getattr(config, "MT5_LOGIN", None)
+            password = getattr(config, "MT5_PASSWORD", None)
+            server = getattr(config, "MT5_SERVER", None)
+        except ImportError:
+            pass
+        if login:
+            ok = mt5.initialize(login=int(login), password=password,
+                                server=server)
+        else:
+            ok = mt5.initialize()
+        if not ok:
             raise RuntimeError(f"MT5 initialize failed: {mt5.last_error()}")
         info = mt5.symbol_info(symbol)
         if info is None:
