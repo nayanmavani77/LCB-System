@@ -160,6 +160,29 @@ class MT5Broker(Broker):
             self.log(f"MT5 {'BUY' if direction > 0 else 'SELL'} {self.lots} "
                      f"{self.symbol} @ {result.price:.2f} SL {sl_x} TP {tp_x} "
                      f"[{tag}]")
+            # Precision re-anchor: if the fill slipped from the quoted price,
+            # move SL/TP so distances are exact from the ACTUAL fill. The
+            # position is protected by the original SL/TP the whole time.
+            if abs(result.price - px) >= 0.01:
+                fill = result.price
+                if direction > 0:
+                    new_sl = round(fill - sl_dist, digits)
+                    new_tp = round(fill + tp_dist, digits)
+                else:
+                    new_sl = round(fill + sl_dist, digits)
+                    new_tp = round(fill - tp_dist, digits)
+                mod = {"action": mt5.TRADE_ACTION_SLTP,
+                       "symbol": self.symbol,
+                       "position": result.order,
+                       "sl": new_sl, "tp": new_tp, "magic": MAGIC}
+                r2 = mt5.order_send(mod)
+                if r2 is not None and r2.retcode == mt5.TRADE_RETCODE_DONE:
+                    self.log(f"MT5 re-anchored SL {sl_x}->{new_sl} "
+                             f"TP {tp_x}->{new_tp} on fill {fill:.2f}")
+                    sl_x, tp_x = new_sl, new_tp
+                else:
+                    self.log("MT5 re-anchor modify rejected; keeping "
+                             "original SL/TP (position stays protected)")
         else:
             self.log(f"MT5 order FAILED retcode={result.retcode} "
                      f"comment={result.comment} [{tag}]")
