@@ -44,10 +44,22 @@ class MT5Broker(Broker):
         self.signal_log_path = signal_log_path
         if signal_log_path and not os.path.exists(signal_log_path):
             with open(signal_log_path, "w", newline="") as f:
-                csv.writer(f).writerow(
-                    ["time_utc", "signal", "symbol", "lots", "fill_price",
-                     "sl", "tp", "gc_ref_px", "gc_sl", "gc_tp",
-                     "status", "tag"])
+                csv.writer(f).writerow([
+                    # ---- GC side: what the strategy saw and decided ----
+                    "gc_signal_time_utc",   # trigger tick time (exchange)
+                    "direction",            # BUY / SELL
+                    "signal_source",        # timeframe + level, e.g. L-Rev|M15|high@4154.60
+                    "gc_trigger_px",        # GC price that fired the signal
+                    "gc_sl", "gc_tp",       # SL/TP in GC prices
+                    "sl_dist", "tp_dist",   # distances carried to MT5 ($/oz)
+                    # ---- MT5 side: what was actually executed ----
+                    "mt5_order_time_utc",   # when the order was sent
+                    "mt5_symbol", "lots",
+                    "mt5_bid", "mt5_ask",   # XAUUSD quote at order time
+                    "mt5_fill_px",          # actual fill
+                    "mt5_sl", "mt5_tp",     # SL/TP as placed on MT5
+                    "status",               # FILLED / FAILED:<retcode>
+                ])
 
         # Optional explicit login from config.py (MT5_LOGIN/PASSWORD/SERVER).
         # If absent, attach to whatever account the running terminal has open.
@@ -132,13 +144,22 @@ class MT5Broker(Broker):
             self.log(f"MT5 order FAILED retcode={result.retcode} "
                      f"comment={result.comment} [{tag}]")
         if self.signal_log_path:
+            gc_time = time.strftime("%Y-%m-%d %H:%M:%S",
+                                    time.gmtime(ts / 1e9)) if ts else ""
             with open(self.signal_log_path, "a", newline="") as f:
-                csv.writer(f).writerow(
-                    [time.strftime("%Y-%m-%d %H:%M:%S", time.gmtime()),
-                     "BUY" if direction > 0 else "SELL", self.symbol,
-                     self.lots, round(result.price, 2) if ok else "",
-                     sl_x, tp_x, round(ref_px, 2), round(sl, 2), round(tp, 2),
-                     "FILLED" if ok else f"FAILED:{result.retcode}", tag])
+                csv.writer(f).writerow([
+                    gc_time,
+                    "BUY" if direction > 0 else "SELL",
+                    tag,
+                    round(ref_px, 2), round(sl, 2), round(tp, 2),
+                    round(sl_dist, 2), round(tp_dist, 2),
+                    time.strftime("%Y-%m-%d %H:%M:%S", time.gmtime()),
+                    self.symbol, self.lots,
+                    round(tick.bid, 2), round(tick.ask, 2),
+                    round(result.price, 2) if ok else "",
+                    sl_x, tp_x,
+                    "FILLED" if ok else f"FAILED:{result.retcode}",
+                ])
 
     def shutdown(self):
         self.mt5.shutdown()
