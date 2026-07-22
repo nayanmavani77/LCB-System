@@ -1,5 +1,8 @@
 """Backtest runner - executes the EXACT same engine (lrev/) that live trading uses.
 
+The full metrics report (overall + yearly + monthly + timeframe + direction
++ exit-reason tables) prints in the terminal right after every run.
+
     python3 backtest.py --start 2026-04-01 --end 2026-07-17
     python3 backtest.py --config v2-ea --csv trades.csv
     python3 backtest.py --config v1            # original L-System, gates off
@@ -53,26 +56,9 @@ def main():
                            trade_log_path=args.csv,
                            log=(print if args.verbose else None))
 
-    s = broker.summary()
-    print(f"\n== {args.config} | {t0.date()} .. {t1.date()} ==")
-    if s["trades"] == 0:
-        print("no trades");
-        return
-    print(f"trades        : {s['trades']}")
-    print(f"net P&L       : {s['net_pts']:+.1f} pts  (${s['net_usd']:+,.0f} per contract)")
-    print(f"win rate      : {s['win_rate']:.0f}%")
-    print(f"profit factor : {s['profit_factor']:.2f}")
-    print(f"max drawdown  : {s['max_dd_pts']:.0f} pts")
-
-    df = pd.DataFrame(broker.closed)
-    df["month"] = (pd.to_datetime(df.ts_open, utc=True)
-                   .dt.tz_convert(None).dt.to_period("M"))
-    print("\nmonthly:")
-    print(df.groupby("month")["pnl_pts"].agg(n="size", pts="sum").round(1).to_string())
-    df["tf"] = df.tag.str.split("|").str[1]
-    print("\nby timeframe:")
-    print(df.groupby("tf")["pnl_pts"].agg(n="size", pts="sum", avg="mean")
-            .round(2).to_string())
+    from lrev.report import print_report
+    print_report(broker, title=f"BACKTEST RESULT  [{args.config}]  "
+                               f"{t0.date()} .. {t1.date()}")
     if args.csv:
         print("\ntrade log:", args.csv)
 

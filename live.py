@@ -71,7 +71,8 @@ def main():
         pass
     finally:
         strat.save_state(args.state_json)
-        print("\nsummary:", broker.summary())
+        from lrev.report import print_report
+        print_report(broker, title="LIVE PAPER SESSION RESULT")
         print("state saved:", args.state_json)
 
 
