@@ -73,17 +73,30 @@ def read_mappings(path):
     return out
 
 
-def merge_segments(per_file_maps):
-    """Merge windows of the same instrument that touch/overlap across files."""
+def merge_segments(per_file_maps, max_gap_days=5):
+    """Merge windows of the same instrument across files. Tolerates small
+    gaps: metadata windows are sometimes clipped exactly at a file's query
+    boundary (e.g. one file ends a contract 2025-12-31, the next starts it
+    2026-01-01), so same-instrument windows within max_gap_days join."""
+    from datetime import date, timedelta
+
     ivals = sorted((iv for m in per_file_maps for iv in m),
                    key=lambda x: (x["start"], x["end"]))
     merged = []
     for iv in ivals:
-        if merged and merged[-1]["iid"] == iv["iid"] \
-                and iv["start"] <= merged[-1]["end"]:
-            merged[-1]["end"] = max(merged[-1]["end"], iv["end"])
-        else:
-            merged.append(dict(iv))
+        target = None
+        for m in reversed(merged):
+            if m["iid"] == iv["iid"]:
+                target = m
+                break
+        if target is not None:
+            gap_ok = (date.fromisoformat(iv["start"]) <=
+                      date.fromisoformat(target["end"]) +
+                      timedelta(days=max_gap_days))
+            if gap_ok:
+                target["end"] = max(target["end"], iv["end"])
+                continue
+        merged.append(dict(iv))
     return merged
 
 
@@ -200,34 +213,39 @@ def main():
                 os.path.join(CACHE, "seg", f"{s['symbol']}_{name}.parquet"))
 
     # ---- ticks: one TBBO file at a time; flush a segment once fully covered
-    pending: dict = {s["symbol"]: [] for s in segments}
+    # (bookkeeping keyed by segment index - names could theoretically collide)
+    pending: dict = {i: [] for i in range(len(segments))}
+    flushed: set = set()
     max_covered = ""
     for fi, path in enumerate(tbbo_files):
         print(f"decoding {os.path.basename(path)} ...")
         tb = decode_tbbo_records(path)
         print(f"  {len(tb):,} records")
-        for s in segments:
+        for i, s in enumerate(segments):
+            if i in flushed:
+                continue
             lo = pd.Timestamp(s["start"], tz="UTC").value
             hi = pd.Timestamp(s["end"], tz="UTC").value
             part = tb[(tb["iid"] == s["iid"]) &
                       (tb["ts"] >= lo) & (tb["ts"] < hi)]
             if len(part):
-                pending[s["symbol"]].append(part.copy())
+                pending[i].append(part.copy())
         del tb
         gc.collect()
         # everything ending on/before this file's last mapped date is complete
         file_end = max(iv["end"] for iv in read_mappings(path))
         max_covered = max(max_covered, file_end)
         is_last = fi == len(tbbo_files) - 1
-        for s in segments:
-            sym = s["symbol"]
-            if pending.get(sym) is None:
+        for i, s in enumerate(segments):
+            if i in flushed:
                 continue
             if is_last or s["end"] <= max_covered:
-                parts = pending.pop(sym)
+                flushed.add(i)
+                parts = pending.pop(i)
                 out = (pd.concat(parts, ignore_index=True)
                        .sort_values("ts").reset_index(drop=True)
                        if parts else pd.DataFrame())
+                sym = s["symbol"]
                 if len(out):
                     out.to_parquet(
                         os.path.join(CACHE, "seg", f"{sym}_tbbo.parquet"))
