@@ -28,16 +28,16 @@ implementation, so backtest behaviour == live behaviour by construction.
     scripts/         prep.py (DBN -> cache), download_data.py, test_mt5.py
     logs/            ALL generated output: trade CSVs, MT5 signal logs,
                      state snapshots (created automatically, gitignored)
-    docs/            research report + equity curve
+    docs/            COMMANDS.md (all commands) + research report + equity curve
     archive/         history: original EAs, study code, study trade logs
     Data/            raw Databento DBN files (gitignored)
     data_cache/      parquet cache built by scripts/prep.py (gitignored)
-    config.py        your secrets - copy from config.example.py (gitignored)
+    config.py        your secrets - template in docs/COMMANDS.md (gitignored)
 
 Adding a new strategy = one file in engines/ + one line in engines/__init__.py;
 it immediately works with every symbol, backtest, live, MT5 and the reports.
 
-**All commands: [`COMMANDS.md`](COMMANDS.md)**
+**All commands: [`docs/COMMANDS.md`](docs/COMMANDS.md)**
 
 ## Quick start
 

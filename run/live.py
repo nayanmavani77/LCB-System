@@ -43,7 +43,7 @@ def get_api_key():
     if not key.startswith("db-"):
         raise SystemExit(
             "No Databento API key found.\n"
-            "Either copy config.example.py to config.py and paste your key there,\n"
+            "Either create config.py with your key (template: docs/COMMANDS.md, section 1),\n"
             "or set the DATABENTO_API_KEY environment variable.")
     return key
 

@@ -14,7 +14,22 @@ cd "C:\Users\nayan\Desktop\Claude Workspace\LCB-System"
 |---|---|
 | `pip install databento pandas pyarrow zstandard numpy` | install everything the backtest needs |
 | `pip install MetaTrader5` | install the MT5 bridge (live trading only) |
-| copy `config.example.py` → `config.py`, fill in your values | API key + optional MT5 login (config.py is gitignored — secrets stay private) |
+| create `config.py` in the project root (template below) | API key + optional MT5 login (config.py is gitignored — secrets stay private) |
+
+`config.py` template:
+
+```python
+# --- Databento (required for live data) ------------------------------
+DATABENTO_API_KEY = "db-PASTE-YOUR-KEY-HERE"
+
+# --- MT5 account (OPTIONAL) -------------------------------------------
+# Leave as None to attach to the account already logged in inside your
+# running MT5 terminal (the usual way). Fill in only if you want the
+# script to log the terminal in itself, e.g. for unattended restarts.
+MT5_LOGIN = None          # e.g. 12345678  (account number)
+MT5_PASSWORD = None       # e.g. "your-password"
+MT5_SERVER = None         # e.g. your broker's server name
+```
 
 ---
 
