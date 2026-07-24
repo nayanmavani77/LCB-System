@@ -135,7 +135,16 @@ Expert Advisors → "Allow algorithmic trading" enabled.
 | `python run/live.py` | GC live signals, **paper fills** (no broker, always safe) |
 | `python run/live.py --broker mt5 --mt5-symbol XAUUSD+ --lots 0.01` | GC signals, **real orders into MT5** |
 | `python run/live.py --symbol SI --broker mt5 --mt5-symbol XAGUSD --lots 0.01` | another symbol end-to-end (VALIDATE IN BACKTEST FIRST) |
+| `python run/live.py --broker mt5 --symbols GC:XAUUSD+:0.01,SI:XAGUSD+:0.02` | **MULTI-SYMBOL in ONE terminal** — per-symbol MT5 symbol and lots |
 | `python run/live.py --no-flow-gate` | run the v2-ea configuration live |
+
+Multi-symbol format: `--symbols NAME[:MT5SYMBOL[:LOTS]],...` — leave a field
+empty to use the default (`core/symbols.py` registry for the MT5 symbol,
+`--lots` for lots). Every other flag (`--rr`, `--vol-gate`, `--no-flow-gate`,
+...) applies to ALL symbols. Each symbol runs as its own child process:
+every line is prefixed `[GC]` / `[SI]`, a symbol that dies is restarted
+automatically after 10s, one symbol's crash never stops the others, and
+Ctrl-C stops all of them cleanly. Logs stay per symbol as usual.
 
 MT5 signal logs are per symbol: `logs\mt5_signals_GC.csv`, `logs\mt5_signals_SI.csv`, ...
 WARNING: the strategy settings were validated on GC ONLY. For any other

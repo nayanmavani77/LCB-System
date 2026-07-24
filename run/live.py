@@ -3,10 +3,14 @@
 Signals are generated from the GC futures TBBO stream (Databento). Execution
 is pluggable:
 
-    python3 live.py                                          # paper fills (default)
-    python3 live.py --broker mt5 --mt5-symbol XAUUSD --lots 0.01
+    python run/live.py                                       # paper fills (default)
+    python run/live.py --broker mt5 --mt5-symbol XAUUSD --lots 0.01
                                                              # real/demo MT5 account
-    python3 live.py --no-flow-gate                           # v2-ea config
+    python run/live.py --broker mt5 --symbols GC:XAUUSD+:0.01,SI:XAGUSD+:0.02
+                                                             # MULTI-SYMBOL, one terminal:
+                                                             # one child process per symbol,
+                                                             # per-symbol MT5 symbol + lots
+    python run/live.py --no-flow-gate                        # v2-ea config
 
 With --broker mt5, GC signal prices are translated to XAUUSD as SL/TP
 DISTANCES re-anchored on the live XAUUSD quote (the futures/spot basis
@@ -69,6 +73,108 @@ def get_api_key():
     return key
 
 
+def _parse_specs(spec_str, default_mt5, default_lots):
+    """Parse --symbols. Each item: NAME[:MT5SYMBOL[:LOTS]].
+    e.g.  GC                      -> registry MT5 symbol, --lots
+          GC:XAUUSD+              -> explicit MT5 symbol, --lots
+          GC:XAUUSD+:0.01,SI:XAGUSD+:0.02   -> fully explicit, two symbols
+    """
+    from core.symbols import get_symbol
+    specs = []
+    for item in spec_str.split(","):
+        item = item.strip()
+        if not item:
+            continue
+        parts = item.split(":")
+        name = parts[0].upper()
+        sym = get_symbol(name)          # validates the symbol name
+        mt5s = (parts[1] if len(parts) > 1 and parts[1]
+                else (default_mt5 or sym["mt5_symbol"]))
+        try:
+            lots = (float(parts[2]) if len(parts) > 2 and parts[2]
+                    else default_lots)
+        except ValueError:
+            raise SystemExit(f"bad lots in --symbols item '{item}' "
+                             f"(format: NAME[:MT5SYMBOL[:LOTS]])")
+        specs.append((name, mt5s, lots))
+    if not specs:
+        raise SystemExit("--symbols is empty")
+    return specs
+
+
+# options the supervisor sets per child - stripped from the passthrough args
+_PER_CHILD = {"--symbol", "--symbols", "--mt5-symbol", "--lots"}
+
+
+def _passthrough(argv):
+    """argv minus the per-child options (kept: --broker, --rr, --engine, ...)."""
+    out, i = [], 0
+    while i < len(argv):
+        key = argv[i].split("=", 1)[0]
+        if key in _PER_CHILD:
+            i += 1 if "=" in argv[i] else 2
+            continue
+        out.append(argv[i])
+        i += 1
+    return out
+
+
+def _supervise(specs, extra):
+    """One terminal, N symbols: run one child process per symbol, prefix
+    every output line with [SYMBOL], restart a child if it dies, and stop
+    everything on Ctrl-C. Child isolation means one symbol's crash or
+    reconnect never interrupts the others' trading."""
+    import subprocess
+    import threading
+    import time
+
+    here = os.path.abspath(__file__)
+
+    def pump(name, p):
+        for line in p.stdout:
+            print(f"[{name}] {line}", end="", flush=True)
+
+    def start(name, mt5s, lots):
+        cmd = [sys.executable, "-u", here, "--symbol", name,
+               "--mt5-symbol", mt5s, "--lots", str(lots)] + extra
+        p = subprocess.Popen(cmd, stdout=subprocess.PIPE,
+                             stderr=subprocess.STDOUT,
+                             text=True, encoding="utf-8", errors="replace")
+        threading.Thread(target=pump, args=(name, p), daemon=True).start()
+        return p
+
+    print(f"supervisor: {len(specs)} symbols in one terminal - Ctrl-C stops all")
+    procs = {}
+    for name, mt5s, lots in specs:
+        procs[name] = start(name, mt5s, lots)
+        print(f"[{name}] started (MT5 symbol {mt5s} @ {lots} lots)")
+    try:
+        while True:
+            time.sleep(2)
+            for name, mt5s, lots in specs:
+                p = procs[name]
+                if p.poll() is not None:
+                    print(f"[{name}] exited with code {p.returncode}; "
+                          f"restarting in 10s")
+                    time.sleep(10)
+                    procs[name] = start(name, mt5s, lots)
+    except KeyboardInterrupt:
+        # on Windows/Unix the Ctrl-C also reaches the children (same console
+        # group), so they save state and disconnect MT5 cleanly themselves
+        print("\nsupervisor: stopping all symbols...")
+    finally:
+        for name, p in procs.items():
+            try:
+                p.wait(timeout=20)
+            except Exception:
+                try:
+                    p.terminate()
+                    p.wait(timeout=5)
+                except Exception:
+                    pass
+        print("supervisor: all stopped")
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--no-flow-gate", action="store_true")
@@ -76,8 +182,14 @@ def main():
     ap.add_argument("--engine", default="lrev", choices=["lrev", "ldef"],
                     help="strategy engine from engines/ (lrev = validated "
                          "BREAK engine; ldef = experimental DEFEND engine)")
-    ap.add_argument("--mt5-symbol", default="XAUUSD")
-    ap.add_argument("--lots", type=float, default=0.01)
+    ap.add_argument("--symbols", "--symbol", dest="symbols", default="GC",
+                    help="comma list, per-symbol MT5 symbol and lots optional: "
+                         "GC:XAUUSD+:0.01,SI:XAGUSD+:0.02 "
+                         "(defaults: core/symbols.py registry and --lots)")
+    ap.add_argument("--mt5-symbol", default=None,
+                    help="MT5 symbol override (default: registry, e.g. GC->XAUUSD)")
+    ap.add_argument("--lots", type=float, default=0.01,
+                    help="default lots (per-symbol override via --symbols)")
     ap.add_argument("--trades-csv", default=None,
                     help="paper trade log (default: paper_trades_<SYMBOL>.csv)")
     ap.add_argument("--cost", type=float, default=0.4,
@@ -89,11 +201,16 @@ def main():
     add_strategy_args(ap)
     args = ap.parse_args()
 
+    specs = _parse_specs(args.symbols, args.mt5_symbol, args.lots)
+    if len(specs) > 1:
+        return _supervise(specs, _passthrough(sys.argv[1:]))
+    name, mt5_symbol, lots = specs[0]
+    args.lots = lots
+
     import databento as db
 
     from core.symbols import get_symbol
-    sym = get_symbol(args.symbol)
-    mt5_symbol = args.mt5_symbol or sym["mt5_symbol"]
+    sym = get_symbol(name)
     if args.trades_csv is None:
         args.trades_csv = f"paper_trades_{sym['name']}.csv"
     if args.state_json is None:
