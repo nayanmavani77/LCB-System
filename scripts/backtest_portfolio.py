@@ -107,11 +107,28 @@ def main():
     eq = usd.cumsum()
     dd = (eq.cummax() - eq).max()
     pf = usd[usd > 0].sum() / max(1e-9, -usd[usd < 0].sum())
+    wins = usd[usd > 0]
+    losses = usd[usd < 0]
     print(f"\n  combined trades : {len(port)}")
     print(f"  combined net    : ${usd.sum():+,.0f}")
+    print(f"  avg / trade     : ${usd.mean():+,.1f}")
+    print(f"  win rate        : {100 * (usd > 0).mean():.1f}%")
     print(f"  combined PF     : {pf:.2f}")
-    print(f"  combined max DD : ${dd:,.0f}   <- joint risk of running "
-          f"these symbols together")
+    print(f"  avg win / loss  : ${wins.mean() if len(wins) else 0:+,.0f} / "
+          f"${losses.mean() if len(losses) else 0:+,.0f}")
+    print(f"  best / worst    : ${usd.max():+,.0f} / ${usd.min():+,.0f}")
+    print(f"  combined max DD : ${dd:,.0f}   <- joint drawdown of running "
+          f"these symbols in parallel")
+    # max number of symbols in a losing month together (correlation glance)
+    pm = port.copy()
+    pm["month"] = (pd.to_datetime(pm["ts_close"], utc=True)
+                   .dt.tz_convert(None).dt.to_period("M"))
+    neg = (pm.groupby(["month", "symbol"])["pnl_usd"].sum() < 0)
+    joint = neg.groupby("month").sum()
+    if len(joint):
+        worst_m = joint.idxmax()
+        print(f"  correlation note: worst month {worst_m} had "
+              f"{joint.max()} symbol(s) negative simultaneously")
     port["month"] = (pd.to_datetime(port["ts_close"], utc=True)
                      .dt.tz_convert(None).dt.to_period("M"))
     print("\n  -- combined monthly ($) " + "-" * 24)
