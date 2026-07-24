@@ -85,6 +85,8 @@ Add these to `backtest.py` or `live.py` — identical meaning in both:
 | `--max-spread 0.9` | skip triggers when spread > $X (0 = off) | 0.90 |
 | `--order-age 35` | cancel unfilled level after N hours (0 = off) | 35 |
 | `--flow-lo 0.0` `--flow-hi 0.6` | flow-gate band (aligned 30s imbalance) | 0.0–0.6 |
+| `--vol-gate 1.2` | regime gate: trade only when volatility ≥ X× its own trailing median (validated value: 1.2) | 0 (off) |
+| `--vol-days 60` | baseline window for the vol gate | 60 |
 
 Workflow: validate a setting in backtest, then run live with the *exact same flags*:
 
