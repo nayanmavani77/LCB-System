@@ -179,9 +179,9 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--no-flow-gate", action="store_true")
     ap.add_argument("--broker", choices=["paper", "mt5"], default="paper")
-    ap.add_argument("--engine", default="lrev", choices=["lrev", "ldef"],
-                    help="strategy engine from engines/ (lrev = validated "
-                         "BREAK engine; ldef = experimental DEFEND engine)")
+    ap.add_argument("--engine", default="lrev", choices=sorted(ENGINES),
+                    help="strategy engine from engines/__init__.py registry "
+                         "(lrev = validated BREAK engine)")
     ap.add_argument("--symbols", "--symbol", dest="symbols", default="GC",
                     help="comma list, per-symbol MT5 symbol and lots optional: "
                          "GC:XAUUSD+:0.01,SI:XAGUSD+:0.02 "
@@ -238,17 +238,13 @@ def main():
         broker = PaperBroker(trade_log_path=args.trades_csv,
                              cost_pts=args.cost,
                              point_value=sym["point_value"])
-    cfg = config_from_args(args, base={"use_flow_gate": not args.no_flow_gate})
+    strategy_cls = ENGINES[args.engine]
+    base = {"use_flow_gate": not args.no_flow_gate}
+    base.update(getattr(strategy_cls, "CLI_DEFAULTS", {}))
+    cfg = config_from_args(args, base=base)
     if args.max_spread is None:
         cfg["max_spread"] = sym["max_spread"]   # per-symbol default gate
-    if args.engine == "ldef":
-        from engines.ldef import DEFEND_CONFIG
-        if args.flow_lo is None:
-            cfg["flow_lo"] = DEFEND_CONFIG["flow_lo"]
-        if args.flow_hi is None:
-            cfg["flow_hi"] = DEFEND_CONFIG["flow_hi"]
-        cfg["engine_name"] = "L-Def"
-    strat = ENGINES[args.engine](broker, config=cfg)
+    strat = strategy_cls(broker, config=cfg)
     print("strategy:", describe(cfg))
 
     hist = db.Historical(api_key)

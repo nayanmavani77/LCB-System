@@ -66,6 +66,12 @@ class Test:
 class LDefStrategy(LRevStrategy):
     """Level-defend engine: touch -> active-defense confirmation -> bounce."""
 
+    # Applied by run/backtest.py & run/live.py as the config BASE for this
+    # engine (explicit CLI flags still win). Any engine can declare this.
+    CLI_DEFAULTS = {"flow_lo": DEFEND_CONFIG["flow_lo"],
+                    "flow_hi": DEFEND_CONFIG["flow_hi"],
+                    "engine_name": "L-Def"}
+
     def __init__(self, broker, config: dict | None = None, log=print):
         cfg = dict(DEFEND_CONFIG)
         if config:

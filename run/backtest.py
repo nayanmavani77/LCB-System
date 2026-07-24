@@ -91,17 +91,12 @@ def main():
         if csv_path and os.path.exists(csv_path):
             os.remove(csv_path)
 
-        cfg = config_from_args(args, base=CONFIGS[args.config])
+        strategy_cls = ENGINES[args.engine]
+        base = dict(CONFIGS[args.config])
+        base.update(getattr(strategy_cls, "CLI_DEFAULTS", {}))
+        cfg = config_from_args(args, base=base)
         if args.max_spread is None:
             cfg["max_spread"] = sym["max_spread"]   # per-symbol default gate
-        strategy_cls = ENGINES[args.engine]
-        if args.engine == "ldef":
-            from engines.ldef import DEFEND_CONFIG
-            if args.flow_lo is None:
-                cfg["flow_lo"] = DEFEND_CONFIG["flow_lo"]
-            if args.flow_hi is None:
-                cfg["flow_hi"] = DEFEND_CONFIG["flow_hi"]
-            cfg["engine_name"] = "L-Def"
         print(f"\nsymbol: {sym['name']} (point value "
               f"${sym['point_value']:,.0f}/contract, cost {cost}/RT)")
         print("strategy:", describe(cfg))
