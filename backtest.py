@@ -1,4 +1,4 @@
-"""Backtest runner - executes the EXACT same engine (lrev/) that live trading uses.
+"""Backtest runner - replays historical ticks through the EXACT same engine that live trading uses (engines/ + core/).
 
 The full metrics report (overall + yearly + monthly + timeframe + direction
 + exit-reason tables) prints in the terminal right after every run.
@@ -23,9 +23,9 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 import pandas as pd
 
-from lrev.cli import add_strategy_args, config_from_args, describe
-from lrev.data import cache_for, data_bounds, replay_window
-from lrev.symbols import get_symbol
+from core.cli import add_strategy_args, config_from_args, describe
+from core.data import cache_for, data_bounds, replay_window
+from core.symbols import get_symbol
 
 CONFIGS = {
     "v2-flow": {"use_flow_gate": True},
@@ -45,20 +45,21 @@ def main():
                          "portfolio section (joint $ P&L and joint max DD, "
                          "as if run in parallel in one account).")
     ap.add_argument("--config", default="v2-flow", choices=sorted(CONFIGS))
-    ap.add_argument("--engine", default="lrev", choices=["lrev", "ldef"],
-                    help="lrev = level BREAK engine (validated); "
-                         "ldef = level DEFEND engine (experimental, lrev/defend.py)")
+    from engines import ENGINES
+    ap.add_argument("--engine", default="lrev", choices=sorted(ENGINES),
+                    help="strategy engine from engines/ (lrev = level BREAK, "
+                         "validated; ldef = level DEFEND, experimental)")
     ap.add_argument("--csv", default=None, help="save the trade list to CSV")
     ap.add_argument("--cost", type=float, default=None,
                     help="commission+slippage per round turn in price units "
-                         "(default: per-symbol value from lrev/symbols.py; "
+                         "(default: per-symbol value from core/symbols.py; "
                          "quoted spread is separately embedded in fill prices)")
     ap.add_argument("--verbose", action="store_true", help="print every signal/fill")
     add_strategy_args(ap)
     args = ap.parse_args()
 
     names = [x.strip().upper() for x in args.symbols.split(",") if x.strip()]
-    from lrev.report import print_portfolio, print_report
+    from core.report import print_portfolio, print_report
     port_dfs = []
     for name in names:
         sym = get_symbol(name)
@@ -92,10 +93,9 @@ def main():
         cfg = config_from_args(args, base=CONFIGS[args.config])
         if args.max_spread is None:
             cfg["max_spread"] = sym["max_spread"]   # per-symbol default gate
-        strategy_cls = None
+        strategy_cls = ENGINES[args.engine]
         if args.engine == "ldef":
-            from lrev.defend import DEFEND_CONFIG, LDefStrategy
-            strategy_cls = LDefStrategy
+            from engines.ldef import DEFEND_CONFIG
             if args.flow_lo is None:
                 cfg["flow_lo"] = DEFEND_CONFIG["flow_lo"]
             if args.flow_hi is None:

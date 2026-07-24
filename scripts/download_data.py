@@ -17,7 +17,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import databento as db
 
-from lrev.symbols import get_symbol
+from core.symbols import get_symbol
 
 _REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 RAW_BASE = os.environ.get("LCB_RAW", os.path.join(_REPO, "Data"))

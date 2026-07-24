@@ -12,8 +12,9 @@ import os
 
 import pandas as pd
 
+from engines.lrev import Bar, LRevStrategy, TF_SECONDS
+
 from .broker import PaperBroker
-from .strategy import Bar, LRevStrategy, TF_SECONDS
 
 _REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 CACHE = os.environ.get("LCB_CACHE", os.path.join(_REPO, "data_cache"))

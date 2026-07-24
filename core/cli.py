@@ -35,7 +35,7 @@ def add_strategy_args(ap):
 
 def config_from_args(args, base: dict | None = None) -> dict:
     """Merge CLI overrides into a strategy config dict."""
-    from .strategy import DEFAULT_CONFIG
+    from engines.lrev import DEFAULT_CONFIG
 
     cfg = dict(DEFAULT_CONFIG)
     cfg["timeframes"] = dict(DEFAULT_CONFIG["timeframes"])

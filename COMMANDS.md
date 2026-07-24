@@ -26,7 +26,7 @@ cd "C:\Users\nayan\Desktop\Claude Workspace\LCB-System"
 | `python scripts/prep.py --symbol SI` | build another symbol's cache from `Data\SI\` |
 | `python scripts/download_data.py --symbol GC --start 2026-07-18 --end 2026-09-01` | download data from Databento into `Data\<SYMBOL>\` (then re-run prep.py for that symbol) |
 
-Known symbols (add more in `lrev/symbols.py`, one dict entry each):
+Known symbols (add more in `core/symbols.py`, one dict entry each):
 GC (gold), SI (silver), HG (copper), PL (platinum), CL (WTI oil), NG (nat gas).
 Everything symbol-specific (Databento symbols, $/point, default spread gate,
 default cost, default MT5 symbol) lives in that registry — the strategy code
@@ -67,7 +67,7 @@ symbols (comma-separated) -> detailed report per symbol plus a combined
 portfolio section showing net $, PF and the JOINT max drawdown as if all
 symbols ran in parallel in one account. With --csv and multiple symbols,
 one file per symbol is written (trades_GC.csv, trades_SI.csv, ...).
-`--cost` and `--max-spread` default to per-symbol values from `lrev/symbols.py`.
+`--cost` and `--max-spread` default to per-symbol values from `core/symbols.py`.
 
 ---
 
@@ -146,16 +146,15 @@ Disable Windows sleep. If the stream dies, just run the command again.
 
 | Path | What it is |
 |---|---|
-| `lrev/strategy.py` | THE strategy (single source of truth for backtest + live) |
-| `lrev/broker.py` | broker interface + paper simulator |
-| `lrev/mt5_broker.py` | MT5 execution adapter (GC signals → XAUUSD distances) |
-| `backtest.py` / `live.py` | the two runners (same engine, same flags) |
+| `engines\lrev.py` | THE validated strategy (single source of truth, backtest + live) |
+| `engines\ldef.py` | experimental defend engine (tested negative - do not trade) |
+| `engines\__init__.py` | engine registry - add new strategies here |
+| `core\` | shared machinery: brokers, data/replay, reports, CLI flags, symbol registry |
+| `backtest.py` / `live.py` | the two runners (same engines, same flags) |
 | `config.py` | your secrets (gitignored) |
-| `Data\` | raw DBN files (gitignored) |
-| `data_cache\` | parquet cache built by prep.py (gitignored) |
+| `Data\` / `data_cache\` | raw DBN files / parquet cache (both gitignored) |
 | `docs\TBBO_Research_Report.md` | how the strategy was found and validated |
-| `research\` | archived study code (not for trading) |
-| `ea\` | archived MT5 EA versions (not used) |
+| `archive\` | original EAs, study code and study trade logs (not for trading) |
 
 ---
 

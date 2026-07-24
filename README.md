@@ -11,25 +11,29 @@ implementation, so backtest behaviour == live behaviour by construction.
 
 ## Layout
 
-    lrev/            THE strategy engine (single source of truth)
-      strategy.py      L-Rev v2 rules: levels, gates, triggers, exits
-      defend.py        L-Def experimental defend engine (tested: not profitable)
-      symbols.py       symbol registry - GC/SI/HG/PL/CL/NG (add more here)
+    backtest.py      backtest runner  (replays history through an engine)
+    live.py          live runner      (streams real-time ticks through an engine)
+    engines/         STRATEGIES - one file per engine, add new ones here
+      lrev.py          L-Rev: level-BREAK engine (validated on GC, OOS on SI)
+      ldef.py          L-Def: level-DEFEND engine (experimental, tested negative)
+    core/            shared machinery (engine-agnostic)
       broker.py        Broker interface + PaperBroker simulator
       mt5_broker.py    MT5 execution adapter (futures signals -> CFD orders)
       data.py          cache loading + tick replay
-    backtest.py      backtest runner (tick replay through lrev/)
-    live.py          live runner (real-time Databento TBBO through lrev/)
-    scripts/         prep.py (DBN -> cache), download_data.py (extend Data/)
-    results/         trade logs from the original research study
+      report.py        terminal metrics report + portfolio section
+      cli.py           shared strategy flags (same in backtest & live)
+      symbols.py       symbol registry (GC/SI/HG/PL/CL/NG - add more here)
+    scripts/         prep.py (DBN -> cache), download_data.py, test_mt5.py
     docs/            research report + equity curve
-    research/        ARCHIVE: vectorized study code that produced the report
-                     numbers - kept for reproducibility, not for trading
-    ea/              ARCHIVE: MT5 versions (v1 original + v2 port), unused
+    archive/         history: original EAs, study code, study trade logs
     Data/            raw Databento DBN files (gitignored)
     data_cache/      parquet cache built by scripts/prep.py (gitignored)
+    config.py        your secrets - copy from config.example.py (gitignored)
 
-**All commands in one place: [`COMMANDS.md`](COMMANDS.md)**
+Adding a new strategy = one file in engines/ + one line in engines/__init__.py;
+it immediately works with every symbol, backtest, live, MT5 and the reports.
+
+**All commands: [`COMMANDS.md`](COMMANDS.md)**
 
 ## Quick start
 

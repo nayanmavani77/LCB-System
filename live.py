@@ -1,4 +1,4 @@
-"""Live runner - executes the EXACT same engine (lrev/) that the backtest uses.
+"""Live runner - streams real-time ticks through the EXACT same engine that the backtest uses (engines/ + core/).
 
 Signals are generated from the GC futures TBBO stream (Databento). Execution
 is pluggable:
@@ -15,7 +15,7 @@ cancels out). Test on a DEMO MT5 account first. Requires Windows,
 
 Bootstraps warmup bars from Databento historical, then streams real-time
 GC.v.0 TBBO. Fills are simulated by PaperBroker until you pass a real
-Broker implementation (see lrev/broker.py) - safe to leave running.
+Broker implementation (see core/broker.py) - safe to leave running.
 """
 import argparse
 import os
@@ -25,7 +25,8 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 import pandas as pd
 
-from lrev import Bar, LRevStrategy, PaperBroker, TF_SECONDS
+from core.broker import PaperBroker
+from engines import ENGINES, Bar, TF_SECONDS
 
 
 def get_api_key():
@@ -52,8 +53,8 @@ def main():
     ap.add_argument("--no-flow-gate", action="store_true")
     ap.add_argument("--broker", choices=["paper", "mt5"], default="paper")
     ap.add_argument("--engine", default="lrev", choices=["lrev", "ldef"],
-                    help="lrev = level BREAK engine (validated); "
-                         "ldef = level DEFEND engine (experimental)")
+                    help="strategy engine from engines/ (lrev = validated "
+                         "BREAK engine; ldef = experimental DEFEND engine)")
     ap.add_argument("--mt5-symbol", default="XAUUSD")
     ap.add_argument("--lots", type=float, default=0.01)
     ap.add_argument("--trades-csv", default=None,
@@ -62,13 +63,13 @@ def main():
                     help="paper-mode commission+slippage per round turn (points)")
     ap.add_argument("--state-json", default=None,
                     help="state snapshot (default: lrev_state_<SYMBOL>.json)")
-    from lrev.cli import add_strategy_args, config_from_args, describe
+    from core.cli import add_strategy_args, config_from_args, describe
     add_strategy_args(ap)
     args = ap.parse_args()
 
     import databento as db
 
-    from lrev.symbols import get_symbol
+    from core.symbols import get_symbol
     sym = get_symbol(args.symbol)
     mt5_symbol = args.mt5_symbol or sym["mt5_symbol"]
     if args.trades_csv is None:
@@ -77,7 +78,7 @@ def main():
         args.state_json = f"lrev_state_{sym['name']}.json"
     api_key = get_api_key()
     if args.broker == "mt5":
-        from lrev.mt5_broker import MT5Broker
+        from core.mt5_broker import MT5Broker
         print(f"note: {sym['mt5_lot_note']}")
         broker = MT5Broker(symbol=mt5_symbol, lots=args.lots,
                            signal_symbol=sym["name"])
@@ -89,15 +90,13 @@ def main():
     if args.max_spread is None:
         cfg["max_spread"] = sym["max_spread"]   # per-symbol default gate
     if args.engine == "ldef":
-        from lrev.defend import DEFEND_CONFIG, LDefStrategy
+        from engines.ldef import DEFEND_CONFIG
         if args.flow_lo is None:
             cfg["flow_lo"] = DEFEND_CONFIG["flow_lo"]
         if args.flow_hi is None:
             cfg["flow_hi"] = DEFEND_CONFIG["flow_hi"]
         cfg["engine_name"] = "L-Def"
-        strat = LDefStrategy(broker, config=cfg)
-    else:
-        strat = LRevStrategy(broker, config=cfg)
+    strat = ENGINES[args.engine](broker, config=cfg)
     print("strategy:", describe(cfg))
 
     hist = db.Historical(api_key)
@@ -168,7 +167,7 @@ def main():
     finally:
         strat.save_state(args.state_json)
         if args.broker == "paper":
-            from lrev.report import print_report
+            from core.report import print_report
             print_report(broker, title="LIVE PAPER SESSION RESULT")
         else:
             broker.shutdown()
