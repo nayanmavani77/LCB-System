@@ -31,6 +31,16 @@ edge is a GOLD daily behavior (pullbacks in trends resuming); silver's
 spikier washouts break it, and at $5,000/pt the dollar risk per ATR is
 far larger. Do not run this engine on SI without a full re-research.
 
+SI RE-RESEARCH (Jul 2026, trained on 2025 only, validated 2023/24/26):
+ALSO NEGATIVE - no silver variant exists. All 864 grid configs (stop 1-2
+ATR, RR 1-2, strength 0.4-0.8, z 0.5-0.8, trend 30-100, hold 10/15) were
+profitable in 2025 (min +$23k) - i.e. 2025's bull run itself was the
+edge, any trend-follower rode it. Every candidate failed held-out years:
+plateau-center -$20k total with a $125k 2026 DD; grid-top +$3k with a
+$212k 2026 DD. Wider stops that looked great in 2025 amplify 2026's
+whipsaws catastrophically. Conclusion: 2025 SI profit was beta, not
+alpha. Do not retune on this data again - the test set is now spent.
+
 Engine-vs-spec differences (all conservative or negligible, be aware):
   - Exits are monitored TICK BY TICK by the broker (server-side SL/TP on
     MT5, tick sim on paper) instead of on daily high/low - this REMOVES the
