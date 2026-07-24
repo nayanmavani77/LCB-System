@@ -38,9 +38,12 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--start", default=None)
     ap.add_argument("--end", default=None)
-    ap.add_argument("--symbol", default="GC",
-                    help="symbol from lrev/symbols.py (default GC); needs its "
-                         "cache built via scripts/prep.py --symbol X")
+    ap.add_argument("--symbols", "--symbol", dest="symbols", default="GC",
+                    help="one or more symbols, comma-separated (e.g. GC or "
+                         "GC,SI). One symbol -> detailed report. Several -> "
+                         "detailed report per symbol PLUS a combined "
+                         "portfolio section (joint $ P&L and joint max DD, "
+                         "as if run in parallel in one account).")
     ap.add_argument("--config", default="v2-flow", choices=sorted(CONFIGS))
     ap.add_argument("--engine", default="lrev", choices=["lrev", "ldef"],
                     help="lrev = level BREAK engine (validated); "
@@ -54,53 +57,68 @@ def main():
     add_strategy_args(ap)
     args = ap.parse_args()
 
-    sym = get_symbol(args.symbol)
-    cache = cache_for(sym["name"])
-    if not os.path.exists(os.path.join(cache, "segments.json")):
-        raise SystemExit(f"no cache for {sym['name']} at {cache} - put DBN files "
-                         f"in Data/{sym['name']}/ and run: "
-                         f"python scripts/prep.py --symbol {sym['name']}")
-    cost = args.cost if args.cost is not None else sym["cost_pts"]
+    names = [x.strip().upper() for x in args.symbols.split(",") if x.strip()]
+    from lrev.report import print_portfolio, print_report
+    port_dfs = []
+    for name in names:
+        sym = get_symbol(name)
+        cache = cache_for(sym["name"])
+        if not os.path.exists(os.path.join(cache, "segments.json")):
+            print(f"\n-- {sym['name']}: NO CACHE, skipped. Put DBN files in "
+                  f"Data/{sym['name']}/ and run: "
+                  f"python scripts/prep.py --symbol {sym['name']}")
+            continue
+        cost = args.cost if args.cost is not None else sym["cost_pts"]
 
-    d0, d1 = data_bounds(cache)
-    t0 = max(pd.Timestamp(args.start, tz="UTC"), d0) if args.start else d0
-    t1 = min(pd.Timestamp(args.end, tz="UTC"), d1) if args.end else d1
-    if t1 <= t0:
-        raise SystemExit(f"empty window; data covers {d0.date()} .. {d1.date()}")
-    if (args.start and pd.Timestamp(args.start, tz="UTC") < d0) or \
-       (args.end and pd.Timestamp(args.end, tz="UTC") > d1):
-        print(f"note: window clamped to available data -> {t0.date()} .. {t1.date()}")
+        d0, d1 = data_bounds(cache)
+        t0 = max(pd.Timestamp(args.start, tz="UTC"), d0) if args.start else d0
+        t1 = min(pd.Timestamp(args.end, tz="UTC"), d1) if args.end else d1
+        if t1 <= t0:
+            print(f"\n-- {sym['name']}: empty window "
+                  f"(data covers {d0.date()} .. {d1.date()}), skipped")
+            continue
+        if (args.start and pd.Timestamp(args.start, tz="UTC") < d0) or \
+           (args.end and pd.Timestamp(args.end, tz="UTC") > d1):
+            print(f"note: {sym['name']} window clamped to available data -> "
+                  f"{t0.date()} .. {t1.date()}")
 
-    if args.csv and os.path.exists(args.csv):
-        os.remove(args.csv)
-    cfg = config_from_args(args, base=CONFIGS[args.config])
-    if args.max_spread is None:
-        cfg["max_spread"] = sym["max_spread"]   # per-symbol default gate
-    strategy_cls = None
-    if args.engine == "ldef":
-        from lrev.defend import DEFEND_CONFIG, LDefStrategy
-        strategy_cls = LDefStrategy
-        # defend flow-band defaults unless user overrode them
-        if args.flow_lo is None:
-            cfg["flow_lo"] = DEFEND_CONFIG["flow_lo"]
-        if args.flow_hi is None:
-            cfg["flow_hi"] = DEFEND_CONFIG["flow_hi"]
-        cfg["engine_name"] = "L-Def"
-    print(f"symbol: {sym['name']} (point value ${sym['point_value']:,.0f}/contract, "
-          f"cost {cost}/RT)")
-    print("strategy:", describe(cfg))
-    broker = replay_window(start=t0, end=t1, config=cfg, cache=cache,
-                           trade_log_path=args.csv,
-                           log=(print if args.verbose else None),
-                           strategy_cls=strategy_cls, cost_pts=cost,
-                           point_value=sym["point_value"])
+        csv_path = args.csv
+        if csv_path and len(names) > 1:
+            root, ext = os.path.splitext(csv_path)
+            csv_path = f"{root}_{sym['name']}{ext or '.csv'}"
+        if csv_path and os.path.exists(csv_path):
+            os.remove(csv_path)
 
-    from lrev.report import print_report
-    print_report(broker, point_value=sym["point_value"],
-                 title=f"BACKTEST RESULT  [{sym['name']} {args.config}]  "
-                       f"{t0.date()} .. {t1.date()}")
-    if args.csv:
-        print("\ntrade log:", args.csv)
+        cfg = config_from_args(args, base=CONFIGS[args.config])
+        if args.max_spread is None:
+            cfg["max_spread"] = sym["max_spread"]   # per-symbol default gate
+        strategy_cls = None
+        if args.engine == "ldef":
+            from lrev.defend import DEFEND_CONFIG, LDefStrategy
+            strategy_cls = LDefStrategy
+            if args.flow_lo is None:
+                cfg["flow_lo"] = DEFEND_CONFIG["flow_lo"]
+            if args.flow_hi is None:
+                cfg["flow_hi"] = DEFEND_CONFIG["flow_hi"]
+            cfg["engine_name"] = "L-Def"
+        print(f"\nsymbol: {sym['name']} (point value "
+              f"${sym['point_value']:,.0f}/contract, cost {cost}/RT)")
+        print("strategy:", describe(cfg))
+        broker = replay_window(start=t0, end=t1, config=cfg, cache=cache,
+                               trade_log_path=csv_path,
+                               log=(print if args.verbose else None),
+                               strategy_cls=strategy_cls, cost_pts=cost,
+                               point_value=sym["point_value"])
+        print_report(broker, point_value=sym["point_value"],
+                     title=f"BACKTEST RESULT  [{sym['name']} {args.config}]  "
+                           f"{t0.date()} .. {t1.date()}")
+        if csv_path:
+            print("\ntrade log:", csv_path)
+        port_dfs.append((sym["name"], pd.DataFrame(broker.closed)))
+
+    if not port_dfs:
+        raise SystemExit("no symbol produced results")
+    print_portfolio(port_dfs)   # prints only when >= 2 symbols have trades
 
 
 if __name__ == "__main__":

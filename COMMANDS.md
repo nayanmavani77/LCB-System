@@ -54,16 +54,20 @@ Examples:
 ```
 python backtest.py                                        # GC, everything, default strategy
 python backtest.py --start 2026-04-01 --end 2026-07-17
-python backtest.py --symbol SI --start 2025-01-01         # another symbol (cache required)
+python backtest.py --symbols SI --start 2025-01-01        # another symbol (cache required)
+python backtest.py --symbols GC,SI --start 2025-01-01     # PARALLEL: per-symbol reports
+                                                          # + combined portfolio ($, joint max DD)
 python backtest.py --start 2023-01-01 --end 2026-01-01 --csv trades.csv
 python backtest.py --config v1                            # original ungated system
 python backtest.py --engine ldef                          # experimental defend engine
 ```
 
+ONE command for everything: one symbol -> full detailed report; several
+symbols (comma-separated) -> detailed report per symbol plus a combined
+portfolio section showing net $, PF and the JOINT max drawdown as if all
+symbols ran in parallel in one account. With --csv and multiple symbols,
+one file per symbol is written (trades_GC.csv, trades_SI.csv, ...).
 `--cost` and `--max-spread` default to per-symbol values from `lrev/symbols.py`.
-
-The full metrics report (overall / yearly / monthly / timeframe / direction /
-exit tables) prints in the terminal after every run.
 
 ---
 

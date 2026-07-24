@@ -87,3 +87,58 @@ def print_report(broker, title="BACKTEST RESULT", point_value=100.0):
     block("by direction", "direction")
     block("by exit reason", "reason")
     print(line)
+
+
+def print_portfolio(dfs):
+    """Combined parallel-account section. dfs = list of (symbol, trades_df)
+    where trades_df rows carry pnl_usd (already scaled by each symbol's
+    point value). Prints only the cross-symbol view - per-symbol detail is
+    print_report's job."""
+    frames = []
+    rows = []
+    for symbol, df in dfs:
+        if df is None or df.empty:
+            continue
+        d = df.copy()
+        d["symbol"] = symbol
+        frames.append(d)
+        usd = d["pnl_usd"]
+        pf = usd[usd > 0].sum() / max(1e-9, -usd[usd < 0].sum())
+        rows.append({"symbol": symbol, "trades": len(d),
+                     "net_usd": round(usd.sum(), 0),
+                     "avg_usd": round(usd.mean(), 1),
+                     "win%": round(100 * (usd > 0).mean(), 1),
+                     "pf": round(pf, 2)})
+    if len(frames) < 2:
+        return
+    line = "=" * 58
+    print(f"\n{line}\n  PORTFOLIO RESULT (symbols combined, in $)\n{line}")
+    print("  " + pd.DataFrame(rows).to_string(index=False).replace("\n", "\n  "))
+    port = (pd.concat(frames, ignore_index=True)
+            .sort_values("ts_close").reset_index(drop=True))
+    usd = port["pnl_usd"]
+    eq = usd.cumsum()
+    dd = (eq.cummax() - eq).max()
+    pf = usd[usd > 0].sum() / max(1e-9, -usd[usd < 0].sum())
+    wins, losses = usd[usd > 0], usd[usd < 0]
+    print(f"\n  combined trades : {len(port)}")
+    print(f"  combined net    : ${usd.sum():+,.0f}")
+    print(f"  avg / trade     : ${usd.mean():+,.1f}")
+    print(f"  win rate        : {100 * (usd > 0).mean():.1f}%")
+    print(f"  combined PF     : {pf:.2f}")
+    print(f"  avg win / loss  : ${wins.mean() if len(wins) else 0:+,.0f} / "
+          f"${losses.mean() if len(losses) else 0:+,.0f}")
+    print(f"  combined max DD : ${dd:,.0f}   <- joint drawdown of running "
+          f"these symbols in parallel")
+    port["month"] = (pd.to_datetime(port["ts_close"], utc=True)
+                     .dt.tz_convert(None).dt.to_period("M"))
+    neg = (port.groupby(["month", "symbol"])["pnl_usd"].sum() < 0)
+    joint = neg.groupby("month").sum()
+    if len(joint) and joint.max() > 1:
+        print(f"  correlation note: worst month {joint.idxmax()} had "
+              f"{joint.max()} symbols negative simultaneously")
+    m = port.groupby("month")["pnl_usd"].agg(n="size", usd="sum").round(0)
+    m["cum_usd"] = m["usd"].cumsum()
+    print("\n  -- combined monthly ($) " + "-" * 24)
+    print("  " + m.to_string().replace("\n", "\n  "))
+    print(line)
