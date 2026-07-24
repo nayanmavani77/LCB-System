@@ -21,12 +21,6 @@ def add_strategy_args(ap):
                    help="spread gate in $ (default 0.90; 0 disables)")
     g.add_argument("--order-age", type=float, default=None,
                    help="cancel unfilled level after N hours (default 35; 0 disables)")
-    g.add_argument("--vol-gate", type=float, default=None,
-                   help="volatility-expansion gate: trade only when MTR/price "
-                        ">= X times its trailing median (validated: 1.2; "
-                        "default 0 = off)")
-    g.add_argument("--vol-days", type=float, default=None,
-                   help="baseline window for --vol-gate in days (default 60)")
     g.add_argument("--flow-lo", type=float, default=None,
                    help="flow gate lower bound (default 0.0)")
     g.add_argument("--flow-hi", type=float, default=None,
@@ -64,10 +58,6 @@ def config_from_args(args, base: dict | None = None) -> dict:
         cfg["max_spread"] = args.max_spread
     if getattr(args, "order_age", None) is not None:
         cfg["order_max_age_h"] = args.order_age
-    if getattr(args, "vol_gate", None) is not None:
-        cfg["vol_gate_ratio"] = args.vol_gate
-    if getattr(args, "vol_days", None) is not None:
-        cfg["vol_baseline_days"] = args.vol_days
     if getattr(args, "flow_lo", None) is not None:
         cfg["flow_lo"] = args.flow_lo
     if getattr(args, "flow_hi", None) is not None:
@@ -78,9 +68,7 @@ def config_from_args(args, base: dict | None = None) -> dict:
 def describe(cfg: dict) -> str:
     tfs = ", ".join(f"{tf} SLx{m}" for tf, m in cfg["timeframes"].items())
     eng = cfg.get("engine_name", "L-Rev")
-    vg = (f" | volgate {cfg['vol_gate_ratio']}x/{cfg['vol_baseline_days']}d"
-          if cfg.get("vol_gate_ratio", 0) > 0 else "")
     fg = "" if cfg["use_flow_gate"] else " (flow gate OFF)"
     return (f"{eng} | RR {cfg['rr']} | {tfs} | spread<= {cfg['max_spread']} | "
             f"age<= {cfg['order_max_age_h']}h | "
-            f"flow [{cfg['flow_lo']},{cfg['flow_hi']}]{vg}{fg}")
+            f"flow [{cfg['flow_lo']},{cfg['flow_hi']}]{fg}")

@@ -101,8 +101,6 @@ Add these to `run/backtest.py` or `run/live.py` — identical meaning in both:
 | `--max-spread 0.9` | skip triggers when spread > $X (0 = off) | 0.90 |
 | `--order-age 35` | cancel unfilled level after N hours (0 = off) | 35 |
 | `--flow-lo 0.0` `--flow-hi 0.6` | flow-gate band (aligned 30s imbalance) | 0.0–0.6 |
-| `--vol-gate 1.2` | regime gate: trade only when volatility ≥ X× its own trailing median (validated value: 1.2) | 0 (off) |
-| `--vol-days 60` | baseline window for the vol gate | 60 |
 
 Workflow: validate a setting in backtest, then run live with the *exact same flags*:
 
@@ -140,7 +138,7 @@ Expert Advisors → "Allow algorithmic trading" enabled.
 
 Multi-symbol format: `--symbols NAME[:MT5SYMBOL[:LOTS]],...` — leave a field
 empty to use the default (`core/symbols.py` registry for the MT5 symbol,
-`--lots` for lots). Every other flag (`--rr`, `--vol-gate`, `--no-flow-gate`,
+`--lots` for lots). Every other flag (`--rr`, `--tf`, `--no-flow-gate`,
 ...) applies to ALL symbols. Each symbol runs as its own child process:
 every line is prefixed `[GC]` / `[SI]`, a symbol that dies is restarted
 automatically after 10s, one symbol's crash never stops the others, and

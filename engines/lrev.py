@@ -45,12 +45,6 @@ DEFAULT_CONFIG = {
     "flow_lo": 0.0,
     "flow_hi": 0.6,
     "flow_window_s": 30,
-    # Volatility-expansion regime gate (research: trained GC 2023-24, validated
-    # GC 2025/2026 + SI 2025/2026, all four periods improved). A level is only
-    # created when the timeframe's current MTR/price is >= vol_gate_ratio x
-    # its own trailing vol_baseline_days median. 0 = gate OFF (default).
-    "vol_gate_ratio": 0.0,
-    "vol_baseline_days": 60,
     "qty": 1,
 }
 
@@ -147,7 +141,6 @@ class LRevStrategy:
         self.broker = broker
         self.log = log
         self.builders = {tf: BarBuilder(TF_SECONDS[tf]) for tf in self.cfg["timeframes"]}
-        self._volhist = {tf: collections.deque() for tf in self.cfg["timeframes"]}
         self.levels: list[Level] = []
         self.flow = FlowWindow(self.cfg["flow_window_s"])
         self.bid = float("nan")
@@ -181,36 +174,7 @@ class LRevStrategy:
             self._prune()
 
     # ---------------------------------------------------------------- swings
-    def _record_vol(self, tf: str):
-        if self.cfg["vol_gate_ratio"] <= 0:
-            return
-        m = self._mtr(tf)
-        bars = self.builders[tf].bars
-        if m > 0 and bars:
-            px = bars[-1].c
-            if px > 0:
-                h = self._volhist[tf]
-                h.append((self.now, m / px))
-                lo = self.now - int(self.cfg["vol_baseline_days"] * 86400 * 1e9)
-                while h and h[0][0] < lo:
-                    h.popleft()
-
-    def _vol_gate_ok(self, tf: str) -> bool:
-        """True when current MTR/price >= ratio x trailing median (or gate off /
-        baseline not yet formed - fail-open so warmup behaves like no gate)."""
-        ratio = self.cfg["vol_gate_ratio"]
-        if ratio <= 0:
-            return True
-        h = self._volhist[tf]
-        if len(h) < 50:
-            return True
-        vals = sorted(v for _, v in h)
-        base = vals[len(vals) // 2]
-        cur = h[-1][1]
-        return base <= 0 or cur >= ratio * base
-
     def _on_bar_close(self, tf: str):
-        self._record_vol(tf)
         fb = self.cfg["fractal_bars"]
         bars = self.builders[tf].bars
         need = 2 * fb + 1
@@ -264,10 +228,6 @@ class LRevStrategy:
             return
         m = self._mtr(tf)
         if m <= 0:
-            return
-        if not self._vol_gate_ok(tf):
-            self.log(f"[{tf}] level {price:.2f} SKIPPED: vol below "
-                     f"{self.cfg['vol_gate_ratio']}x baseline (quiet regime)")
             return
         lv = Level(tf=tf, price=price, is_low=is_low, formed_ns=formed_ns,
                    detected_ns=self.now,
