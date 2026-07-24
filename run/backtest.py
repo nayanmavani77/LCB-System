@@ -99,7 +99,8 @@ def main():
             cfg["max_spread"] = sym["max_spread"]   # per-symbol default gate
         print(f"\nsymbol: {sym['name']} (point value "
               f"${sym['point_value']:,.0f}/contract, cost {cost}/RT)")
-        print("strategy:", describe(cfg))
+        print("strategy:", strategy_cls.describe(cfg)
+              if hasattr(strategy_cls, "describe") else describe(cfg))
         broker = replay_window(start=t0, end=t1, config=cfg, cache=cache,
                                trade_log_path=csv_path,
                                log=(print if args.verbose else None),

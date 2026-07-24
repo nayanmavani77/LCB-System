@@ -274,15 +274,19 @@ def main():
     if args.max_spread is None:
         cfg["max_spread"] = sym["max_spread"]   # per-symbol default gate
     strat = strategy_cls(broker, config=cfg)
-    print("strategy:", describe(cfg))
+    print("strategy:", strategy_cls.describe(cfg)
+          if hasattr(strategy_cls, "describe") else describe(cfg))
 
+    # engines declare how much history they need (default 20 calendar days;
+    # e.g. G-Trend needs ~170 for its 50-session MA + slope + z windows)
+    warmup_days = getattr(strategy_cls, "WARMUP_DAYS", 20)
     hist = db.Historical(api_key)
     end = pd.Timestamp.utcnow().floor("min") - pd.Timedelta(minutes=10)
     m1 = None
     for backoff_h in (0, 6, 24, 48):   # historical can lag real time
         try:
             e = end - pd.Timedelta(hours=backoff_h)
-            start = e - pd.Timedelta(days=20)
+            start = e - pd.Timedelta(days=warmup_days)
             print(f"bootstrapping bars {start} .. {e} ...")
             data = hist.timeseries.get_range(
                 dataset=sym["dataset"], schema="ohlcv-1m",
@@ -346,10 +350,12 @@ def main():
                     n_ticks += 1
                     now = _time.time()
                     if now - last_beat >= 60:
+                        status = (strat.status() if hasattr(strat, "status")
+                                  else f"flow {strat.flow.imbalance():+.2f} | "
+                                       f"{len(strat.levels)} levels armed")
                         print(f"[heartbeat] {_time.strftime('%H:%M:%S UTC', _time.gmtime())} | "
-                              f"{n_ticks:,} ticks so far | {sym['name']} {bid:.2f}/{ask:.2f} | "
-                              f"flow {strat.flow.imbalance():+.2f} | "
-                              f"{len(strat.levels)} levels armed")
+                              f"{n_ticks:,} ticks so far | {sym['name']} "
+                              f"{bid:.2f}/{ask:.2f} | {status}")
                         last_beat = now
                 # iterator ended without an exception = gateway closed the session
                 raise ConnectionError("live session closed by gateway")

@@ -44,6 +44,7 @@ class MT5Broker(Broker):
             signal_log_path = log_path(f"mt5_signals_{signal_symbol}.csv")
         self.lots = lots
         self.deviation = deviation_points
+        self._oc_cache = {}
         self.log = log
         self.signal_log_path = signal_log_path
         if signal_log_path and not os.path.exists(signal_log_path):
@@ -196,6 +197,65 @@ class MT5Broker(Broker):
                       round(tick.bid, 2), round(tick.ask, 2),
                       round(result.price, 2) if ok else "", sl_x, tp_x,
                       "FILLED" if ok else f"FAILED:{result.retcode}")
+
+    # ------------------------------------------------------------- queries
+    def _my_positions(self, tag_prefix: str = ""):
+        pos = self.mt5.positions_get(symbol=self.symbol) or []
+        return [p for p in pos
+                if p.magic == MAGIC and p.comment.startswith(tag_prefix)]
+
+    def open_count(self, tag_prefix: str = "") -> int:
+        # 1s TTL cache: engines may query this per tick; a terminal RPC per
+        # tick is wasteful and 1s staleness is irrelevant at daily cadence
+        import time as _t
+        now = _t.monotonic()
+        cached = self._oc_cache.get(tag_prefix)
+        if cached and now - cached[0] < 1.0:
+            return cached[1]
+        n = len(self._my_positions(tag_prefix))
+        self._oc_cache[tag_prefix] = (now, n)
+        return n
+
+    def close_position(self, ts, tag: str) -> bool:
+        """Close our open position whose comment matches the tag (used by
+        engines for time stops). Sends an opposite DEAL against the ticket."""
+        mt5 = self.mt5
+        for p in self._my_positions():
+            if p.comment != tag[:31]:
+                continue
+            tick = mt5.symbol_info_tick(self.symbol)
+            if tick is None:
+                self.log(f"MT5 close: no tick, retry next session [{tag}]")
+                return False
+            closing_buy = p.type == mt5.POSITION_TYPE_SELL
+            request = {
+                "action": mt5.TRADE_ACTION_DEAL,
+                "symbol": self.symbol,
+                "position": p.ticket,
+                "volume": p.volume,
+                "type": (mt5.ORDER_TYPE_BUY if closing_buy
+                         else mt5.ORDER_TYPE_SELL),
+                "price": tick.ask if closing_buy else tick.bid,
+                "deviation": self.deviation,
+                "magic": MAGIC,
+                "comment": ("close:" + tag)[:31],
+                "type_time": mt5.ORDER_TIME_GTC,
+                "type_filling": mt5.ORDER_FILLING_IOC,
+            }
+            result = mt5.order_send(request)
+            if result is not None and result.retcode != mt5.TRADE_RETCODE_DONE:
+                request["type_filling"] = mt5.ORDER_FILLING_FOK
+                result = mt5.order_send(request)
+            ok = result is not None and result.retcode == mt5.TRADE_RETCODE_DONE
+            if ok:
+                self.log(f"MT5 CLOSED position {p.ticket} @ "
+                         f"{result.price:.2f} [{tag}]")
+            else:
+                rc = result.retcode if result is not None else "send_error"
+                self.log(f"MT5 close FAILED retcode={rc} [{tag}] - "
+                         f"position keeps its server-side SL/TP")
+            return ok
+        return False
 
     def shutdown(self):
         self.mt5.shutdown()

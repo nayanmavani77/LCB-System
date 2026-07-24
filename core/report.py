@@ -16,6 +16,13 @@ def print_report(broker, title="BACKTEST RESULT", point_value=100.0):
     df = pd.DataFrame(closed)
     df["dt"] = pd.to_datetime(df["ts_open"], utc=True)
     df = df.sort_values("ts_open").reset_index(drop=True)
+    # size-weight the points so fractional-lot engines (e.g. G-Trend's
+    # 2 x 0.5) report P&L on the SIZED basis; qty=1 engines are unchanged
+    if "qty" in df.columns:
+        q = df["qty"].fillna(1.0)
+        df["pnl_pts"] = df["pnl_pts"] * q
+        if "pnl_gross_pts" in df.columns:
+            df["pnl_gross_pts"] = df["pnl_gross_pts"] * q
     pts = df["pnl_pts"]
 
     wins = pts[pts > 0]
@@ -24,6 +31,8 @@ def print_report(broker, title="BACKTEST RESULT", point_value=100.0):
     dd = (eq.cummax() - eq).max()
     pf = wins.sum() / -losses.sum() if len(losses) and losses.sum() < 0 else float("inf")
     risk = (df["entry"] - df["sl"]).abs()
+    if "qty" in df.columns:
+        risk = risk * df["qty"].fillna(1.0)   # pts are size-weighted above
     r = (pts / risk.replace(0, float("nan"))).dropna()
 
     days = max(1e-9, (df.dt.iloc[-1] - df.dt.iloc[0]).total_seconds() / 86400)

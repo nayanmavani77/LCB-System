@@ -54,6 +54,34 @@ def seed_warmup(strat: LRevStrategy, sym: str, cutoff_ns: int, cache: str = CACH
                                              pre.itertuples())])
 
 
+def seed_warmup_full(strat, segs, cutoff_ns: int, cache: str = CACHE):
+    """Warmup for engines that need LONG history (WANTS_FULL_HISTORY): seed
+    bars across ALL contract segments (each clipped to its front-month
+    window) up to cutoff - a continuous front-month bar series spanning
+    rolls. Engines declare which timeframes they want via WARMUP_TFS."""
+    tfs = getattr(type(strat), "WARMUP_TFS", tuple(TF_SECONDS))
+    for tf in tfs:
+        frames = []
+        for seg in segs:
+            s0 = pd.Timestamp(seg["start"], tz="UTC").value
+            s1 = min(pd.Timestamp(seg["end"], tz="UTC").value, cutoff_ns)
+            if s1 <= s0:
+                continue
+            p = os.path.join(cache, "seg", f"{seg['symbol']}_{tf}.parquet")
+            if not os.path.exists(p):
+                continue
+            b = pd.read_parquet(p)
+            bt = b.index.view("int64")
+            frames.append(b[(bt >= s0) & (bt < s1)])
+        if not frames:
+            continue
+        bars = pd.concat(frames).sort_index()
+        bars = bars[~bars.index.duplicated(keep="last")]
+        strat.seed_bars(tf, [Bar(int(t), r.open, r.high, r.low, r.close, r.volume)
+                             for t, r in zip(bars.index.view("int64"),
+                                             bars.itertuples())])
+
+
 def replay_window(start=None, end=None, config: dict | None = None,
                   cache: str = CACHE, trade_log_path=None,
                   log=None, progress=print, strategy_cls=None,
@@ -83,7 +111,10 @@ def replay_window(start=None, end=None, config: dict | None = None,
         sym = seg["symbol"]
         cls = strategy_cls or LRevStrategy
         strat = cls(broker, config=config, log=log)
-        seed_warmup(strat, sym, lo, cache)
+        if getattr(cls, "WANTS_FULL_HISTORY", False):
+            seed_warmup_full(strat, segs, lo, cache)
+        else:
+            seed_warmup(strat, sym, lo, cache)
 
         tb = pd.read_parquet(os.path.join(cache, "seg", f"{sym}_tbbo.parquet"))
         tb = tb[(tb.ts >= lo) & (tb.ts < hi)]

@@ -75,6 +75,8 @@ python run/backtest.py --symbols GC,SI --start 2025-01-01     # PARALLEL: per-sy
 python run/backtest.py --start 2023-01-01 --end 2026-01-01 --csv trades.csv
 python run/backtest.py --config v1                            # original ungated system
 python run/backtest.py --engine ldef                          # experimental defend engine
+python run/backtest.py --engine gtrend --start 2024-01-01     # daily trend-pullback engine
+python run/backtest.py --engine gtrend-lowdd                  # same rules, LOW-DD sizing
 ```
 
 ONE command for everything: one symbol -> full detailed report; several
@@ -101,6 +103,12 @@ Add these to `run/backtest.py` or `run/live.py` — identical meaning in both:
 | `--max-spread 0.9` | skip triggers when spread > $X (0 = off) | 0.90 |
 | `--order-age 35` | cancel unfilled level after N hours (0 = off) | 35 |
 | `--flow-lo 0.0` `--flow-hi 0.6` | flow-gate band (aligned 30s imbalance) | 0.0–0.6 |
+
+NOTE: these flags configure the L-Rev/L-Def level engines. The G-Trend
+engine ignores them - its parameters were frozen on 2024-2025 data and live
+in `engines\gtrend.py` (GTREND_CONFIG). It decides once per day at the CME
+close (17:00 ET) and fills at the 18:00 ET reopen, so expect ~3 trades per
+MONTH and days-long holds; heartbeats show its trend/strength state.
 
 Workflow: validate a setting in backtest, then run live with the *exact same flags*:
 
@@ -192,6 +200,7 @@ Disable Windows sleep. If the stream dies, just run the command again.
 |---|---|
 | `engines\lrev.py` | THE validated strategy (single source of truth, backtest + live) |
 | `engines\ldef.py` | experimental defend engine (tested negative - do not trade) |
+| `engines\gtrend.py` | G-Trend: daily trend-pullback engine (spec: `docs\GTREND_SPEC.md`; validate on your data before live) |
 | `engines\__init__.py` | engine registry - add new strategies here |
 | `core\` | shared machinery: brokers, data/replay, reports, CLI flags, symbols, paths |
 | `run\backtest.py` / `run\live.py` | the two runners (same engines, same flags) |

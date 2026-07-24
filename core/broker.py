@@ -28,6 +28,17 @@ class Broker(ABC):
         simulate SL/TP fills; real-venue adapters (server-side SL/TP) don't
         need it."""
 
+    def open_count(self, tag_prefix: str = "") -> int:
+        """Number of currently open positions whose tag starts with
+        tag_prefix. Engines use this for concurrency limits and to detect
+        that a position was closed by its SL/TP. Default: 0."""
+        return 0
+
+    def close_position(self, ts: int, tag: str) -> bool:
+        """Close the open position with exactly this tag at market (e.g. a
+        time stop). Returns True if a position was closed. Default: no-op."""
+        return False
+
 
 
 @dataclass
@@ -89,6 +100,17 @@ class PaperBroker(Broker):
         for pos in list(self.positions):
             px = self.bid if pos.direction > 0 else self.ask
             self._close(pos, ts, px, "manual")
+
+    def open_count(self, tag_prefix: str = "") -> int:
+        return sum(1 for p in self.positions if p.tag.startswith(tag_prefix))
+
+    def close_position(self, ts, tag: str) -> bool:
+        for pos in list(self.positions):
+            if pos.tag == tag:
+                px = self.bid if pos.direction > 0 else self.ask
+                self._close(pos, ts, px, "time")
+                return True
+        return False
 
     def _close(self, pos, ts, px, reason):
         self.positions.remove(pos)
