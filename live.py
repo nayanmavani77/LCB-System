@@ -66,14 +66,22 @@ def main():
 
     import databento as db
 
+    from lrev.symbols import get_symbol
+    sym = get_symbol(args.symbol)
+    mt5_symbol = args.mt5_symbol or sym["mt5_symbol"]
     api_key = get_api_key()
     if args.broker == "mt5":
         from lrev.mt5_broker import MT5Broker
-        broker = MT5Broker(symbol=args.mt5_symbol, lots=args.lots)
+        print(f"note: {sym['mt5_lot_note']}")
+        broker = MT5Broker(symbol=mt5_symbol, lots=args.lots,
+                           signal_symbol=sym["name"])
     else:
         broker = PaperBroker(trade_log_path=args.trades_csv,
-                             cost_pts=args.cost)
+                             cost_pts=args.cost,
+                             point_value=sym["point_value"])
     cfg = config_from_args(args, base={"use_flow_gate": not args.no_flow_gate})
+    if args.max_spread is None:
+        cfg["max_spread"] = sym["max_spread"]   # per-symbol default gate
     if args.engine == "ldef":
         from lrev.defend import DEFEND_CONFIG, LDefStrategy
         if args.flow_lo is None:
@@ -95,8 +103,8 @@ def main():
             start = e - pd.Timedelta(days=20)
             print(f"bootstrapping bars {start} .. {e} ...")
             data = hist.timeseries.get_range(
-                dataset="GLBX.MDP3", schema="ohlcv-1m",
-                stype_in="continuous", symbols=["GC.v.0"],
+                dataset=sym["dataset"], schema="ohlcv-1m",
+                stype_in="continuous", symbols=[sym["continuous"]],
                 start=start.isoformat(), end=e.isoformat())
             m1 = data.to_df()
             if len(m1):
@@ -124,11 +132,11 @@ def main():
         print(f"  {tf}: {len(bars)} warmup bars")
 
     mode = ("PAPER trading" if args.broker == "paper"
-            else f"LIVE orders -> MT5 {args.mt5_symbol} @ {args.lots} lots")
-    print(f"subscribing to live TBBO (GC.v.0)... {mode}, Ctrl-C to stop")
+            else f"LIVE orders -> MT5 {mt5_symbol} @ {args.lots} lots")
+    print(f"subscribing to live TBBO ({sym['continuous']})... {mode}, Ctrl-C to stop")
     client = db.Live(key=api_key)
-    client.subscribe(dataset="GLBX.MDP3", schema="tbbo",
-                     stype_in="continuous", symbols=["GC.v.0"])
+    client.subscribe(dataset=sym["dataset"], schema="tbbo",
+                     stype_in="continuous", symbols=[sym["continuous"]])
     import time as _time
     n_ticks = 0
     last_beat = _time.time()
@@ -145,7 +153,7 @@ def main():
             now = _time.time()
             if now - last_beat >= 60:
                 print(f"[heartbeat] {_time.strftime('%H:%M:%S UTC', _time.gmtime())} | "
-                      f"{n_ticks:,} ticks so far | GC {bid:.2f}/{ask:.2f} | "
+                      f"{n_ticks:,} ticks so far | {sym['name']} {bid:.2f}/{ask:.2f} | "
                       f"flow {strat.flow.imbalance():+.2f} | "
                       f"{len(strat.levels)} levels armed")
                 last_beat = now

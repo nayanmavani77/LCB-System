@@ -18,12 +18,19 @@ cd "C:\Users\nayan\Desktop\Claude Workspace\LCB-System"
 
 ---
 
-## 2. Data
+## 2. Data (multi-symbol)
 
 | Command | What it does |
 |---|---|
-| `python scripts/prep.py` | build the backtest cache from ALL DBN files in `Data\` — run once, and again whenever you add data |
-| `python scripts/download_data.py --start 2026-07-18 --end 2026-09-01` | download new GC data from Databento into `Data\` (then re-run prep.py) |
+| `python scripts/prep.py` | build the GC cache from DBN files in `Data\` — run once, and again whenever you add data |
+| `python scripts/prep.py --symbol SI` | build another symbol's cache from `Data\SI\` |
+| `python scripts/download_data.py --symbol GC --start 2026-07-18 --end 2026-09-01` | download data from Databento into `Data\<SYMBOL>\` (then re-run prep.py for that symbol) |
+
+Known symbols (add more in `lrev/symbols.py`, one dict entry each):
+GC (gold), SI (silver), HG (copper), PL (platinum), CL (WTI oil), NG (nat gas).
+Everything symbol-specific (Databento symbols, $/point, default spread gate,
+default cost, default MT5 symbol) lives in that registry — the strategy code
+never changes per symbol.
 
 ---
 
@@ -45,11 +52,15 @@ python backtest.py --start YYYY-MM-DD --end YYYY-MM-DD
 Examples:
 
 ```
-python backtest.py                                        # everything, default strategy
+python backtest.py                                        # GC, everything, default strategy
 python backtest.py --start 2026-04-01 --end 2026-07-17
+python backtest.py --symbol SI --start 2025-01-01         # another symbol (cache required)
 python backtest.py --start 2023-01-01 --end 2026-01-01 --csv trades.csv
 python backtest.py --config v1                            # original ungated system
+python backtest.py --engine ldef                          # experimental defend engine
 ```
+
+`--cost` and `--max-spread` default to per-symbol values from `lrev/symbols.py`.
 
 The full metrics report (overall / yearly / monthly / timeframe / direction /
 exit tables) prints in the terminal after every run.
@@ -99,9 +110,17 @@ Expert Advisors → "Allow algorithmic trading" enabled.
 
 | Command | What it does |
 |---|---|
-| `python live.py` | live signals, **paper fills** (no broker, always safe) |
-| `python live.py --broker mt5 --mt5-symbol XAUUSD+ --lots 0.01` | live signals, **real orders into MT5** |
+| `python live.py` | GC live signals, **paper fills** (no broker, always safe) |
+| `python live.py --broker mt5 --mt5-symbol XAUUSD+ --lots 0.01` | GC signals, **real orders into MT5** |
+| `python live.py --symbol SI --broker mt5 --mt5-symbol XAGUSD --lots 0.01` | another symbol end-to-end (VALIDATE IN BACKTEST FIRST) |
 | `python live.py --no-flow-gate` | run the v2-ea configuration live |
+
+MT5 signal logs are per symbol: `mt5_signals_GC.csv`, `mt5_signals_SI.csv`, ...
+WARNING: the strategy settings were validated on GC ONLY. For any other
+symbol, backtest thoroughly (download data -> prep -> backtest, ideally
+multiple years) before paper trading it, and paper trade before real money.
+Also verify your broker's CFD lot size equals the futures contract size —
+GC/XAUUSD match 1:1, but e.g. oil CFDs are often 1/10th of a CL contract.
 
 While running you'll see: a `[heartbeat]` line every minute (tick count,
 GC quote, flow, armed levels — proof data is flowing), `[M15] level ...`

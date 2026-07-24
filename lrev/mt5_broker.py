@@ -34,10 +34,13 @@ MAGIC = 26031604  # matches the old EA's L-System magic range
 
 class MT5Broker(Broker):
     def __init__(self, symbol="XAUUSD", lots=0.01, deviation_points=30,
-                 log=print, signal_log_path="mt5_signals.csv"):
+                 log=print, signal_log_path=None, signal_symbol="GC"):
         import MetaTrader5 as mt5  # noqa: N813 (Windows-only package)
         self.mt5 = mt5
         self.symbol = symbol
+        self.signal_symbol = signal_symbol
+        if signal_log_path is None:
+            signal_log_path = f"mt5_signals_{signal_symbol}.csv"
         self.lots = lots
         self.deviation = deviation_points
         self.log = log
@@ -45,13 +48,14 @@ class MT5Broker(Broker):
         if signal_log_path and not os.path.exists(signal_log_path):
             with open(signal_log_path, "w", newline="") as f:
                 csv.writer(f).writerow([
-                    # ---- GC side: what the strategy saw and decided ----
-                    "gc_signal_time_utc",   # trigger tick time (exchange)
+                    # ---- signal side: what the strategy saw and decided ----
+                    "sig_symbol",           # futures symbol the signal came from
+                    "sig_time_utc",         # trigger tick time (exchange)
                     "direction",            # BUY / SELL
                     "signal_source",        # timeframe + level, e.g. L-Rev|M15|high@4154.60
-                    "gc_trigger_px",        # GC price that fired the signal
-                    "gc_sl", "gc_tp",       # SL/TP in GC prices
-                    "sl_dist", "tp_dist",   # distances carried to MT5 ($/oz)
+                    "sig_trigger_px",       # futures price that fired the signal
+                    "sig_sl", "sig_tp",     # SL/TP in futures prices
+                    "sl_dist", "tp_dist",   # distances carried to MT5
                     # ---- MT5 side: what was actually executed ----
                     "mt5_order_time_utc",   # when the order was sent
                     "mt5_symbol", "lots",
@@ -95,6 +99,7 @@ class MT5Broker(Broker):
                                 time.gmtime(ts / 1e9)) if ts else ""
         with open(self.signal_log_path, "a", newline="") as f:
             csv.writer(f).writerow([
+                self.signal_symbol,
                 gc_time, "BUY" if direction > 0 else "SELL", tag,
                 round(ref_px, 2), round(sl, 2), round(tp, 2),
                 round(sl_dist, 2), round(tp_dist, 2),

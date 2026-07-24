@@ -1,45 +1,66 @@
-"""Extend Data/ with fresh GC history from Databento (historical API).
+"""Download GC/SI/HG/... history from Databento into Data/<SYMBOL>/.
 
-    export DATABENTO_API_KEY=db-XXXX
-    python3 download_data.py --start 2026-07-18 --end 2026-09-01
+    export DATABENTO_API_KEY=db-XXXX   (or config.py)
+    python3 scripts/download_data.py --symbol GC --start 2026-07-18 --end 2026-09-01
+    python3 scripts/download_data.py --symbol SI --start 2025-01-01 --end 2026-07-01
 
-Downloads the same two schemas the backtest needs (continuous front-month
-TBBO + parent OHLCV-1m) into the repo's Data/ folder, then re-run
-backtest/prep.py to rebuild the cache. Cost note: TBBO for GC runs roughly
-2-3M records/month; check the print-out of hist.metadata.get_cost if unsure.
+Downloads the two schemas the backtest needs (continuous front-month TBBO +
+parent OHLCV-1m), then run:  python3 scripts/prep.py --symbol <SYMBOL>
+Cost note: TBBO runs millions of records/month for liquid symbols; check
+your Databento usage page if unsure.
 """
 import argparse
 import os
+import sys
+
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import databento as db
 
+from lrev.symbols import get_symbol
+
 _REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-RAW = os.environ.get("LCB_RAW", os.path.join(_REPO, "Data"))
+RAW_BASE = os.environ.get("LCB_RAW", os.path.join(_REPO, "Data"))
+
+
+def get_api_key():
+    try:
+        import config
+        key = getattr(config, "DATABENTO_API_KEY", "") or ""
+        if key.startswith("db-"):
+            return key
+    except ImportError:
+        pass
+    return os.environ.get("DATABENTO_API_KEY", "") or None
 
 
 def main():
     ap = argparse.ArgumentParser()
+    ap.add_argument("--symbol", default="GC")
     ap.add_argument("--start", required=True)
     ap.add_argument("--end", required=True)
     args = ap.parse_args()
+    sym = get_symbol(args.symbol)
+    raw = os.path.join(RAW_BASE, sym["name"])
+    os.makedirs(raw, exist_ok=True)
 
-    hist = db.Historical()
+    hist = db.Historical(get_api_key())
+    tag = sym["name"].lower()
     jobs = [
-        ("tbbo", "continuous", ["GC.v.0"], f"gc_tbbo_v0_{args.start}_{args.end}.dbn.zst"),
-        ("ohlcv-1m", "parent", ["GC.FUT"], f"gc_ohlcv1m_parent_{args.start}_{args.end}.dbn.zst"),
+        ("tbbo", "continuous", [sym["continuous"]],
+         f"{tag}_tbbo_v0_{args.start}_{args.end}.dbn.zst"),
+        ("ohlcv-1m", "parent", [sym["parent"]],
+         f"{tag}_ohlcv1m_parent_{args.start}_{args.end}.dbn.zst"),
     ]
-    os.makedirs(RAW, exist_ok=True)
     for schema, stype, symbols, fname in jobs:
-        out = os.path.join(RAW, fname)
+        out = os.path.join(raw, fname)
         print(f"downloading {schema} ({symbols}) {args.start}..{args.end} -> {out}")
         data = hist.timeseries.get_range(
-            dataset="GLBX.MDP3", schema=schema, stype_in=stype,
+            dataset=sym["dataset"], schema=schema, stype_in=stype,
             symbols=symbols, start=args.start, end=args.end)
         data.to_file(out)
         print("  done,", os.path.getsize(out) // 1_000_000, "MB")
-    print("\nnow run:  python3 backtest/prep.py")
-    print("note: prep.py globs *tbbo*/*ohlcv1m* and uses the NEWEST match;")
-    print("for a seamless extended backtest, download one range covering old+new dates.")
+    print(f"\nnow run:  python3 scripts/prep.py --symbol {sym['name']}")
 
 
 if __name__ == "__main__":

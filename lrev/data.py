@@ -19,6 +19,18 @@ _REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 CACHE = os.environ.get("LCB_CACHE", os.path.join(_REPO, "data_cache"))
 
 
+def cache_for(symbol: str = "GC", base: str | None = None) -> str:
+    """Per-symbol cache dir: data_cache/<SYM>. GC falls back to the legacy
+    flat data_cache/ layout if the per-symbol dir doesn't exist yet."""
+    root = base or CACHE
+    per = os.path.join(root, symbol.upper())
+    if os.path.exists(os.path.join(per, "segments.json")):
+        return per
+    if symbol.upper() == "GC" and os.path.exists(os.path.join(root, "segments.json")):
+        return root  # legacy layout
+    return per
+
+
 def load_segments(cache: str = CACHE):
     with open(os.path.join(cache, "segments.json")) as f:
         return json.load(f)
@@ -44,7 +56,7 @@ def seed_warmup(strat: LRevStrategy, sym: str, cutoff_ns: int, cache: str = CACH
 def replay_window(start=None, end=None, config: dict | None = None,
                   cache: str = CACHE, trade_log_path=None,
                   log=None, progress=print, strategy_cls=None,
-                  cost_pts=0.4):
+                  cost_pts=0.4, point_value=100.0):
     """Replay [start, end) through the engine. Returns the PaperBroker."""
     silent = (lambda *a, **k: None)
     log = log or silent
@@ -59,7 +71,7 @@ def replay_window(start=None, end=None, config: dict | None = None,
     t1 = _ns(end, 2**63 - 1)
 
     broker = PaperBroker(trade_log_path=trade_log_path, log=log,
-                         cost_pts=cost_pts)
+                         cost_pts=cost_pts, point_value=point_value)
     total = 0
     for seg in segs:
         seg_t0 = pd.Timestamp(seg["start"], tz="UTC").value

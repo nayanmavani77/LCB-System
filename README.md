@@ -1,6 +1,6 @@
 # LCB-System
 
-Gold futures (GC) trading system: **L-Rev v2**, a swing-level breakout strategy
+Futures trading system (GC-validated, multi-symbol capable): **L-Rev v2**, a swing-level breakout strategy
 derived from the original L/CB EA through TBBO (tick + order-flow) research.
 Full methodology and findings: [`docs/TBBO_Research_Report.md`](docs/TBBO_Research_Report.md).
 
@@ -13,7 +13,10 @@ implementation, so backtest behaviour == live behaviour by construction.
 
     lrev/            THE strategy engine (single source of truth)
       strategy.py      L-Rev v2 rules: levels, gates, triggers, exits
+      defend.py        L-Def experimental defend engine (tested: not profitable)
+      symbols.py       symbol registry - GC/SI/HG/PL/CL/NG (add more here)
       broker.py        Broker interface + PaperBroker simulator
+      mt5_broker.py    MT5 execution adapter (futures signals -> CFD orders)
       data.py          cache loading + tick replay
     backtest.py      backtest runner (tick replay through lrev/)
     live.py          live runner (real-time Databento TBBO through lrev/)

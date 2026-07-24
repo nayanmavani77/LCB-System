@@ -19,6 +19,7 @@ Memory note: files are processed one at a time; peak usage is roughly one
 year of TBBO as a DataFrame (~2-3 GB for a busy year).
 """
 import gc
+import argparse
 import glob
 import json
 import os
@@ -27,9 +28,29 @@ import numpy as np
 import pandas as pd
 
 _REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-RAW = os.environ.get("LCB_RAW", os.path.join(_REPO, "Data"))
-CACHE = os.environ.get("LCB_CACHE", os.path.join(_REPO, "data_cache"))
+RAW_BASE = os.environ.get("LCB_RAW", os.path.join(_REPO, "Data"))
+CACHE_BASE = os.environ.get("LCB_CACHE", os.path.join(_REPO, "data_cache"))
 WARMUP_DAYS = 30
+
+# set by main() per --symbol; GC falls back to the legacy flat Data/ layout
+RAW = RAW_BASE
+CACHE = CACHE_BASE
+
+
+def resolve_dirs(symbol: str):
+    global RAW, CACHE
+    sym = symbol.upper()
+    per_raw = os.path.join(RAW_BASE, sym)
+    if os.path.isdir(per_raw) and glob.glob(os.path.join(per_raw, "*.dbn.zst")):
+        RAW = per_raw
+    elif sym == "GC" and glob.glob(os.path.join(RAW_BASE, "*.dbn.zst")):
+        RAW = RAW_BASE          # legacy flat layout for GC
+    else:
+        RAW = per_raw           # will raise a clear error in find_all
+    CACHE = os.path.join(CACHE_BASE, sym)
+    if sym == "GC" and not os.path.isdir(CACHE) \
+            and os.path.exists(os.path.join(CACHE_BASE, "segments.json")):
+        CACHE = CACHE_BASE      # keep updating the legacy GC cache
 
 
 def find_all(pattern):
@@ -120,6 +141,14 @@ def agg_bars(m1, minutes):
 
 def main():
     import databento as db
+
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--symbol", default="GC",
+                    help="symbol short name from lrev/symbols.py (default GC); "
+                         "expects DBN files in Data/<SYMBOL>/ (GC also: Data/)")
+    args = ap.parse_args()
+    resolve_dirs(args.symbol)
+    print(f"symbol {args.symbol.upper()}: raw={RAW}  cache={CACHE}")
 
     os.makedirs(os.path.join(CACHE, "seg"), exist_ok=True)
     tbbo_files = find_all("*tbbo*.dbn.zst")
