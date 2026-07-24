@@ -151,7 +151,14 @@ Stop with **Ctrl-C** — open MT5 positions keep their server-side SL/TP.
 
 Files written (all in `logs\`): `paper_trades_<SYMBOL>.csv` (paper mode
 trade log), `state_<SYMBOL>.json` (state snapshot on exit),
-`mt5_signals_<SYMBOL>.csv` (every MT5 order attempt, GC side + MT5 side).
+`mt5_signals_<SYMBOL>.csv` (every MT5 order attempt, GC side + MT5 side),
+`live_<SYMBOL>_<start time>.log` (full copy of everything the session
+printed — one file per run, survives after the terminal is closed).
+
+If the data stream drops (network outage, PC slept), live.py now
+reconnects on its own: it saves state, retries after 5s → 15s → 60s →
+5 min, and keeps trying until the stream is back. You lose signals only
+while the connection is actually down.
 
 Good to know: ~3–5 signals/day with long quiet stretches is normal.
 GC halts daily ~2:30–3:30 AM IST and weekends Fri ~2:30 AM → Sun ~3:30 AM IST.

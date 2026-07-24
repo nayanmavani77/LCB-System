@@ -29,6 +29,27 @@ from core.broker import PaperBroker
 from engines import ENGINES, Bar, TF_SECONDS
 
 
+class _Tee:
+    """Mirror everything written to a stream into a log file as well."""
+    def __init__(self, stream, fh):
+        self._s, self._f = stream, fh
+
+    def write(self, data):
+        self._s.write(data)
+        try:
+            self._f.write(data)
+            self._f.flush()
+        except Exception:
+            pass                     # never let logging kill the stream
+
+    def flush(self):
+        self._s.flush()
+        try:
+            self._f.flush()
+        except Exception:
+            pass
+
+
 def get_api_key():
     """Databento key: config.py (DATABENTO_API_KEY = "db-...") wins,
     else the DATABENTO_API_KEY environment variable."""
@@ -79,6 +100,17 @@ def main():
         args.state_json = f"state_{sym['name']}.json"
     args.trades_csv = log_path(args.trades_csv)
     args.state_json = log_path(args.state_json)
+
+    # mirror the whole session (heartbeats, levels, gates, fills, errors)
+    # into logs/live_<SYMBOL>_<start time>.log
+    from datetime import datetime, timezone
+    session_log = log_path(
+        f"live_{sym['name']}_{datetime.now(timezone.utc):%Y%m%d_%H%M%S}.log")
+    _log_fh = open(session_log, "a", encoding="utf-8")
+    sys.stdout = _Tee(sys.stdout, _log_fh)
+    sys.stderr = _Tee(sys.stderr, _log_fh)
+    print(f"session log: {session_log}")
+
     api_key = get_api_key()
     if args.broker == "mt5":
         from core.mt5_broker import MT5Broker
@@ -142,29 +174,60 @@ def main():
     mode = ("PAPER trading" if args.broker == "paper"
             else f"LIVE orders -> MT5 {mt5_symbol} @ {args.lots} lots")
     print(f"subscribing to live TBBO ({sym['continuous']})... {mode}, Ctrl-C to stop")
-    client = db.Live(key=api_key)
-    client.subscribe(dataset=sym["dataset"], schema="tbbo",
-                     stype_in="continuous", symbols=[sym["continuous"]])
     import time as _time
+    RECONNECT_WAITS = (5, 15, 60, 300)   # escalating; stays at 5 min
     n_ticks = 0
-    last_beat = _time.time()
+    reconnects = 0
+    stop = False
     try:
-        for rec in client:
-            if not hasattr(rec, "price"):
-                continue
-            bid = rec.bid_px_00 / 1e9
-            ask = rec.ask_px_00 / 1e9
-            px = rec.price / 1e9
-            broker.on_tick(rec.ts_recv, bid, ask)
-            strat.on_tick(rec.ts_recv, px, rec.size, rec.side, bid, ask)
-            n_ticks += 1
-            now = _time.time()
-            if now - last_beat >= 60:
-                print(f"[heartbeat] {_time.strftime('%H:%M:%S UTC', _time.gmtime())} | "
-                      f"{n_ticks:,} ticks so far | {sym['name']} {bid:.2f}/{ask:.2f} | "
-                      f"flow {strat.flow.imbalance():+.2f} | "
-                      f"{len(strat.levels)} levels armed")
-                last_beat = now
+        while not stop:
+            client = db.Live(key=api_key)
+            client.subscribe(dataset=sym["dataset"], schema="tbbo",
+                             stype_in="continuous", symbols=[sym["continuous"]])
+            last_beat = _time.time()
+            fresh_connection = True
+            try:
+                for rec in client:
+                    if not hasattr(rec, "price"):
+                        continue
+                    if fresh_connection:
+                        fresh_connection = False
+                        if reconnects:
+                            print(f"[reconnect] stream re-established, "
+                                  f"resuming at tick {n_ticks:,}")
+                        reconnects = 0   # healthy again -> reset backoff
+                    bid = rec.bid_px_00 / 1e9
+                    ask = rec.ask_px_00 / 1e9
+                    px = rec.price / 1e9
+                    broker.on_tick(rec.ts_recv, bid, ask)
+                    strat.on_tick(rec.ts_recv, px, rec.size, rec.side, bid, ask)
+                    n_ticks += 1
+                    now = _time.time()
+                    if now - last_beat >= 60:
+                        print(f"[heartbeat] {_time.strftime('%H:%M:%S UTC', _time.gmtime())} | "
+                              f"{n_ticks:,} ticks so far | {sym['name']} {bid:.2f}/{ask:.2f} | "
+                              f"flow {strat.flow.imbalance():+.2f} | "
+                              f"{len(strat.levels)} levels armed")
+                        last_beat = now
+                # iterator ended without an exception = gateway closed the session
+                raise ConnectionError("live session closed by gateway")
+            except KeyboardInterrupt:
+                stop = True
+            except Exception as exc:
+                wait = RECONNECT_WAITS[min(reconnects, len(RECONNECT_WAITS) - 1)]
+                reconnects += 1
+                strat.save_state(args.state_json)
+                print(f"[reconnect] stream lost: {exc}")
+                print(f"[reconnect] state saved; retrying in {wait}s "
+                      f"(attempt {reconnects}) - Ctrl-C to stop")
+                try:
+                    client.stop()
+                except Exception:
+                    pass
+                try:
+                    _time.sleep(wait)
+                except KeyboardInterrupt:
+                    stop = True
     except KeyboardInterrupt:
         pass
     finally:
