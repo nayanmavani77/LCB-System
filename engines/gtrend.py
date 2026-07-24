@@ -19,6 +19,17 @@ next session's first trade = the reopen):
     TIME STOP   flatten after 10 held sessions
 Spec metrics (1-unit risk, net of taker costs): 2024 +$25.9k, 2025 +$73.0k
 (in-sample), 2026 Jan-Jul OUT-OF-SAMPLE +$103.8k PF 3.68 in a crash year.
+Validated on real GC ticks in THIS engine (Jul 2026): 2023 +$4.2k PF 1.29,
+2024 +$37.0k PF 2.64, 2025 +$72.7k PF 2.53 (0.4% from spec), 2026 Jan-Jul
++$111.4k PF 4.91 - profitable every year, worst DD ~$16k.
+
+DOES NOT TRANSFER TO SILVER - GC ONLY. Tested on real SI ticks 2023-2026
+(Jul 2026): 2023 -$17.2k PF 0.22, 2024 -$10.7k PF 0.75, 2025 +$56.7k
+PF 1.94 (monster bull year), 2026 -$16.2k PF 0.85 with a $73.0k max DD.
+Net ~+$12.6k over 3.5 years against a $73k drawdown = untradeable. The
+edge is a GOLD daily behavior (pullbacks in trends resuming); silver's
+spikier washouts break it, and at $5,000/pt the dollar risk per ATR is
+far larger. Do not run this engine on SI without a full re-research.
 
 Engine-vs-spec differences (all conservative or negligible, be aware):
   - Exits are monitored TICK BY TICK by the broker (server-side SL/TP on
