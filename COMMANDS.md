@@ -39,7 +39,7 @@ never changes per symbol.
 Basic form:
 
 ```
-python backtest.py --start YYYY-MM-DD --end YYYY-MM-DD
+python run/backtest.py --start YYYY-MM-DD --end YYYY-MM-DD
 ```
 
 | Option | Meaning | Default |
@@ -52,14 +52,14 @@ python backtest.py --start YYYY-MM-DD --end YYYY-MM-DD
 Examples:
 
 ```
-python backtest.py                                        # GC, everything, default strategy
-python backtest.py --start 2026-04-01 --end 2026-07-17
-python backtest.py --symbols SI --start 2025-01-01        # another symbol (cache required)
-python backtest.py --symbols GC,SI --start 2025-01-01     # PARALLEL: per-symbol reports
-                                                          # + combined portfolio ($, joint max DD)
-python backtest.py --start 2023-01-01 --end 2026-01-01 --csv trades.csv
-python backtest.py --config v1                            # original ungated system
-python backtest.py --engine ldef                          # experimental defend engine
+python run/backtest.py                                        # GC, everything, default strategy
+python run/backtest.py --start 2026-04-01 --end 2026-07-17
+python run/backtest.py --symbols SI --start 2025-01-01        # another symbol (cache required)
+python run/backtest.py --symbols GC,SI --start 2025-01-01     # PARALLEL: per-symbol reports
+                                                              # + combined portfolio ($, joint max DD)
+python run/backtest.py --start 2023-01-01 --end 2026-01-01 --csv trades.csv
+python run/backtest.py --config v1                            # original ungated system
+python run/backtest.py --engine ldef                          # experimental defend engine
 ```
 
 ONE command for everything: one symbol -> full detailed report; several
@@ -68,12 +68,13 @@ portfolio section showing net $, PF and the JOINT max drawdown as if all
 symbols ran in parallel in one account. With --csv and multiple symbols,
 one file per symbol is written (trades_GC.csv, trades_SI.csv, ...).
 `--cost` and `--max-spread` default to per-symbol values from `core/symbols.py`.
+All generated CSVs land in `logs\` (give an absolute path to override).
 
 ---
 
 ## 4. Strategy settings (SAME flags for backtest AND live)
 
-Add these to `backtest.py` or `live.py` — identical meaning in both:
+Add these to `run/backtest.py` or `run/live.py` — identical meaning in both:
 
 | Flag | Meaning | Default |
 |---|---|---|
@@ -91,8 +92,8 @@ Add these to `backtest.py` or `live.py` — identical meaning in both:
 Workflow: validate a setting in backtest, then run live with the *exact same flags*:
 
 ```
-python backtest.py --start 2026-01-01 --rr 3.0 --sl-m15 1.0
-python live.py --broker mt5 --mt5-symbol XAUUSD+ --lots 0.01 --rr 3.0 --sl-m15 1.0
+python run/backtest.py --start 2026-01-01 --rr 3.0 --sl-m15 1.0
+python run/live.py --broker mt5 --mt5-symbol XAUUSD+ --lots 0.01 --rr 3.0 --sl-m15 1.0
 ```
 
 Every run prints its configuration first (`strategy: RR 3.0 | ...`) so you
@@ -116,12 +117,12 @@ Expert Advisors → "Allow algorithmic trading" enabled.
 
 | Command | What it does |
 |---|---|
-| `python live.py` | GC live signals, **paper fills** (no broker, always safe) |
-| `python live.py --broker mt5 --mt5-symbol XAUUSD+ --lots 0.01` | GC signals, **real orders into MT5** |
-| `python live.py --symbol SI --broker mt5 --mt5-symbol XAGUSD --lots 0.01` | another symbol end-to-end (VALIDATE IN BACKTEST FIRST) |
-| `python live.py --no-flow-gate` | run the v2-ea configuration live |
+| `python run/live.py` | GC live signals, **paper fills** (no broker, always safe) |
+| `python run/live.py --broker mt5 --mt5-symbol XAUUSD+ --lots 0.01` | GC signals, **real orders into MT5** |
+| `python run/live.py --symbol SI --broker mt5 --mt5-symbol XAGUSD --lots 0.01` | another symbol end-to-end (VALIDATE IN BACKTEST FIRST) |
+| `python run/live.py --no-flow-gate` | run the v2-ea configuration live |
 
-MT5 signal logs are per symbol: `mt5_signals_GC.csv`, `mt5_signals_SI.csv`, ...
+MT5 signal logs are per symbol: `logs\mt5_signals_GC.csv`, `logs\mt5_signals_SI.csv`, ...
 WARNING: the strategy settings were validated on GC ONLY. For any other
 symbol, backtest thoroughly (download data -> prep -> backtest, ideally
 multiple years) before paper trading it, and paper trade before real money.
@@ -133,8 +134,9 @@ GC quote, flow, armed levels — proof data is flowing), `[M15] level ...`
 lines when swings are detected, gate `SKIPPED` lines, and order fills.
 Stop with **Ctrl-C** — open MT5 positions keep their server-side SL/TP.
 
-Files written: `paper_trades.csv` (paper mode trade log),
-`lrev_state.json` (state snapshot on exit).
+Files written (all in `logs\`): `paper_trades_<SYMBOL>.csv` (paper mode
+trade log), `state_<SYMBOL>.json` (state snapshot on exit),
+`mt5_signals_<SYMBOL>.csv` (every MT5 order attempt, GC side + MT5 side).
 
 Good to know: ~3–5 signals/day with long quiet stretches is normal.
 GC halts daily ~2:30–3:30 AM IST and weekends Fri ~2:30 AM → Sun ~3:30 AM IST.
@@ -149,8 +151,10 @@ Disable Windows sleep. If the stream dies, just run the command again.
 | `engines\lrev.py` | THE validated strategy (single source of truth, backtest + live) |
 | `engines\ldef.py` | experimental defend engine (tested negative - do not trade) |
 | `engines\__init__.py` | engine registry - add new strategies here |
-| `core\` | shared machinery: brokers, data/replay, reports, CLI flags, symbol registry |
-| `backtest.py` / `live.py` | the two runners (same engines, same flags) |
+| `core\` | shared machinery: brokers, data/replay, reports, CLI flags, symbols, paths |
+| `run\backtest.py` / `run\live.py` | the two runners (same engines, same flags) |
+| `scripts\` | data prep, data download, MT5 connection test |
+| `logs\` | ALL generated output: trade CSVs, MT5 signal logs, state files (gitignored) |
 | `config.py` | your secrets (gitignored) |
 | `Data\` / `data_cache\` | raw DBN files / parquet cache (both gitignored) |
 | `docs\TBBO_Research_Report.md` | how the strategy was found and validated |

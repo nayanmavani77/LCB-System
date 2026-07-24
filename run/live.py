@@ -21,7 +21,7 @@ import argparse
 import os
 import sys
 
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import pandas as pd
 
@@ -64,6 +64,7 @@ def main():
     ap.add_argument("--state-json", default=None,
                     help="state snapshot (default: lrev_state_<SYMBOL>.json)")
     from core.cli import add_strategy_args, config_from_args, describe
+    from core.paths import log_path
     add_strategy_args(ap)
     args = ap.parse_args()
 
@@ -75,7 +76,9 @@ def main():
     if args.trades_csv is None:
         args.trades_csv = f"paper_trades_{sym['name']}.csv"
     if args.state_json is None:
-        args.state_json = f"lrev_state_{sym['name']}.json"
+        args.state_json = f"state_{sym['name']}.json"
+    args.trades_csv = log_path(args.trades_csv)
+    args.state_json = log_path(args.state_json)
     api_key = get_api_key()
     if args.broker == "mt5":
         from core.mt5_broker import MT5Broker

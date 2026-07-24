@@ -19,12 +19,13 @@ import argparse
 import os
 import sys
 
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import pandas as pd
 
 from core.cli import add_strategy_args, config_from_args, describe
 from core.data import cache_for, data_bounds, replay_window
+from core.paths import log_path
 from core.symbols import get_symbol
 
 CONFIGS = {
@@ -83,7 +84,7 @@ def main():
             print(f"note: {sym['name']} window clamped to available data -> "
                   f"{t0.date()} .. {t1.date()}")
 
-        csv_path = args.csv
+        csv_path = log_path(args.csv) if args.csv else None
         if csv_path and len(names) > 1:
             root, ext = os.path.splitext(csv_path)
             csv_path = f"{root}_{sym['name']}{ext or '.csv'}"

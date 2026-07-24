@@ -33,5 +33,6 @@ Desktop.ini
 config.py
 
 # ---- generated outputs (backtest/live logs) ----
+logs/
 *.csv
 lrev_state*.json

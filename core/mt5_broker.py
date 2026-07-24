@@ -40,7 +40,8 @@ class MT5Broker(Broker):
         self.symbol = symbol
         self.signal_symbol = signal_symbol
         if signal_log_path is None:
-            signal_log_path = f"mt5_signals_{signal_symbol}.csv"
+            from .paths import log_path
+            signal_log_path = log_path(f"mt5_signals_{signal_symbol}.csv")
         self.lots = lots
         self.deviation = deviation_points
         self.log = log

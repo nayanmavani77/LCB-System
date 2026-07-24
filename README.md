@@ -5,14 +5,15 @@ derived from the original L/CB EA through TBBO (tick + order-flow) research.
 Full methodology and findings: [`docs/TBBO_Research_Report.md`](docs/TBBO_Research_Report.md).
 
 **One engine, one source of truth:** the strategy exists exactly once, in
-`lrev/strategy.py`. The backtest replays historical ticks through it; live
+`engines/lrev.py`. The backtest replays historical ticks through it; live
 trading streams real-time ticks through it. There is no separate backtest
 implementation, so backtest behaviour == live behaviour by construction.
 
 ## Layout
 
-    backtest.py      backtest runner  (replays history through an engine)
-    live.py          live runner      (streams real-time ticks through an engine)
+    run/             the two RUNNERS (same engines, same flags)
+      backtest.py      replays history through an engine
+      live.py          streams real-time ticks through an engine (paper or MT5)
     engines/         STRATEGIES - one file per engine, add new ones here
       lrev.py          L-Rev: level-BREAK engine (validated on GC, OOS on SI)
       ldef.py          L-Def: level-DEFEND engine (experimental, tested negative)
@@ -23,7 +24,10 @@ implementation, so backtest behaviour == live behaviour by construction.
       report.py        terminal metrics report + portfolio section
       cli.py           shared strategy flags (same in backtest & live)
       symbols.py       symbol registry (GC/SI/HG/PL/CL/NG - add more here)
+      paths.py         routes all generated files into logs/
     scripts/         prep.py (DBN -> cache), download_data.py, test_mt5.py
+    logs/            ALL generated output: trade CSVs, MT5 signal logs,
+                     state snapshots (created automatically, gitignored)
     docs/            research report + equity curve
     archive/         history: original EAs, study code, study trade logs
     Data/            raw Databento DBN files (gitignored)
@@ -38,10 +42,10 @@ it immediately works with every symbol, backtest, live, MT5 and the reports.
 ## Quick start
 
     pip install databento pandas pyarrow zstandard numpy
-    python3 scripts/prep.py                                   # build cache (once per dataset)
-    python3 backtest.py --start 2026-04-01 --end 2026-07-17   # any date window
-    python3 backtest.py --config v2-ea --csv trades.csv       # export trades
-    python3 live.py                                           # real-time paper trading
+    python scripts/prep.py                                       # build cache (once per dataset)
+    python run/backtest.py --start 2026-04-01 --end 2026-07-17   # any date window
+    python run/backtest.py --config v2-ea --csv trades.csv      # export trades (-> logs/)
+    python run/live.py                                           # real-time paper trading
 
 Backtest configs: `v2-flow` (default: age cap 35h + spread cap $0.90 + flow
 gate), `v2-ea` (no flow gate), `v1` (original, gates off). New data: drop any
@@ -51,9 +55,10 @@ file's metadata, merged across year boundaries, and the backtest date range
 extends automatically. Multi-year prep decodes one TBBO file at a time
 (peak RAM roughly one year, ~2-3 GB).
 
-To trade a real account, implement the small `Broker` interface in
-`lrev/broker.py` for your venue (e.g. IBKR via ib_insync) and pass it to
-`LRevStrategy` in place of `PaperBroker`. The strategy code does not change.
+Live MT5 execution is built in (`core/mt5_broker.py`, futures signal ->
+CFD order with SL/TP as re-anchored distances). For any other venue,
+implement the small `Broker` interface in `core/broker.py` and pass it to
+the strategy in place of `PaperBroker`. The strategy code does not change.
 
 ## Results - unified engine, Dec 28 2025 - Jul 17 2026
 
