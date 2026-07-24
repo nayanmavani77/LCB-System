@@ -34,4 +34,4 @@ config.py
 
 # ---- generated outputs (backtest/live logs) ----
 *.csv
-lrev_state.json
+lrev_state*.json

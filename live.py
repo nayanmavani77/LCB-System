@@ -56,10 +56,12 @@ def main():
                          "ldef = level DEFEND engine (experimental)")
     ap.add_argument("--mt5-symbol", default="XAUUSD")
     ap.add_argument("--lots", type=float, default=0.01)
-    ap.add_argument("--trades-csv", default="paper_trades.csv")
+    ap.add_argument("--trades-csv", default=None,
+                    help="paper trade log (default: paper_trades_<SYMBOL>.csv)")
     ap.add_argument("--cost", type=float, default=0.4,
                     help="paper-mode commission+slippage per round turn (points)")
-    ap.add_argument("--state-json", default="lrev_state.json")
+    ap.add_argument("--state-json", default=None,
+                    help="state snapshot (default: lrev_state_<SYMBOL>.json)")
     from lrev.cli import add_strategy_args, config_from_args, describe
     add_strategy_args(ap)
     args = ap.parse_args()
@@ -69,6 +71,10 @@ def main():
     from lrev.symbols import get_symbol
     sym = get_symbol(args.symbol)
     mt5_symbol = args.mt5_symbol or sym["mt5_symbol"]
+    if args.trades_csv is None:
+        args.trades_csv = f"paper_trades_{sym['name']}.csv"
+    if args.state_json is None:
+        args.state_json = f"lrev_state_{sym['name']}.json"
     api_key = get_api_key()
     if args.broker == "mt5":
         from lrev.mt5_broker import MT5Broker
