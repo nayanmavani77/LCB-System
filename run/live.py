@@ -74,12 +74,14 @@ def get_api_key():
 
 
 def _parse_specs(spec_str, default_mt5, default_lots):
-    """Parse --symbols. Each item: NAME[:MT5SYMBOL[:LOTS]].
-    e.g.  GC                      -> registry MT5 symbol, --lots
-          GC:XAUUSD+              -> explicit MT5 symbol, --lots
-          GC:XAUUSD+:0.01,SI:XAGUSD+:0.02   -> fully explicit, two symbols
+    """Parse --symbols. Each item: NAME[:MT5SYMBOL[:LOTS[:ENGINE]]].
+    e.g.  GC                          -> registry MT5 symbol, --lots, --engine
+          GC:XAUUSD+                  -> explicit MT5 symbol, --lots
+          GC:XAUUSD+:0.01,SI:XAGUSD+:0.02          -> two symbols
+          GC:XAUUSD+:0.01:lrev,GC:XAUUSD+:0.01:ldef -> two ENGINES, one symbol
     """
     from core.symbols import get_symbol
+    from engines import ENGINES
     specs = []
     for item in spec_str.split(","):
         item = item.strip()
@@ -95,8 +97,12 @@ def _parse_specs(spec_str, default_mt5, default_lots):
                     else default_lots)
         except ValueError:
             raise SystemExit(f"bad lots in --symbols item '{item}' "
-                             f"(format: NAME[:MT5SYMBOL[:LOTS]])")
-        specs.append((name, mt5s, lots))
+                             f"(format: NAME[:MT5SYMBOL[:LOTS[:ENGINE]]])")
+        eng = parts[3].lower() if len(parts) > 3 and parts[3] else None
+        if eng is not None and eng not in ENGINES:
+            raise SystemExit(f"unknown engine '{eng}' in --symbols item "
+                             f"'{item}' (valid: {sorted(ENGINES)})")
+        specs.append((name, mt5s, lots, eng))
     if not specs:
         raise SystemExit("--symbols is empty")
     return specs
@@ -120,44 +126,60 @@ def _passthrough(argv):
 
 
 def _supervise(specs, extra):
-    """One terminal, N symbols: run one child process per symbol, prefix
-    every output line with [SYMBOL], restart a child if it dies, and stop
-    everything on Ctrl-C. Child isolation means one symbol's crash or
-    reconnect never interrupts the others' trading."""
+    """One terminal, N children: one child process per (symbol, engine)
+    entry, every output line prefixed with [SYMBOL] or [SYMBOL/engine],
+    a child that dies is restarted, Ctrl-C stops all. Child isolation
+    means one entry's crash or reconnect never interrupts the others."""
     import subprocess
     import threading
     import time
 
     here = os.path.abspath(__file__)
 
-    def pump(name, p):
-        for line in p.stdout:
-            print(f"[{name}] {line}", end="", flush=True)
+    def label_of(name, eng):
+        return f"{name}/{eng}" if eng else name
 
-    def start(name, mt5s, lots):
-        cmd = [sys.executable, "-u", here, "--symbol", name,
-               "--mt5-symbol", mt5s, "--lots", str(lots)] + extra
+    def pump(label, p):
+        for line in p.stdout:
+            print(f"[{label}] {line}", end="", flush=True)
+
+    def start(name, mt5s, lots, eng):
+        # per-child options come AFTER the shared extras, so they win
+        # (argparse: the last occurrence of an option takes effect)
+        cmd = [sys.executable, "-u", here] + extra + \
+              ["--symbol", name, "--mt5-symbol", mt5s, "--lots", str(lots)]
+        if eng:
+            cmd += ["--engine", eng]
         p = subprocess.Popen(cmd, stdout=subprocess.PIPE,
                              stderr=subprocess.STDOUT,
                              text=True, encoding="utf-8", errors="replace")
-        threading.Thread(target=pump, args=(name, p), daemon=True).start()
+        threading.Thread(target=pump, args=(label_of(name, eng), p),
+                         daemon=True).start()
         return p
 
-    print(f"supervisor: {len(specs)} symbols in one terminal - Ctrl-C stops all")
+    labels = [label_of(n, e) for n, _, _, e in specs]
+    if len(set(labels)) != len(labels):
+        raise SystemExit("duplicate --symbols entries (same symbol AND same "
+                         "engine twice makes no sense - give each entry a "
+                         "different engine via NAME:MT5:LOTS:ENGINE)")
+    print(f"supervisor: {len(specs)} children in one terminal - Ctrl-C stops all")
     procs = {}
-    for name, mt5s, lots in specs:
-        procs[name] = start(name, mt5s, lots)
-        print(f"[{name}] started (MT5 symbol {mt5s} @ {lots} lots)")
+    for name, mt5s, lots, eng in specs:
+        lab = label_of(name, eng)
+        procs[lab] = start(name, mt5s, lots, eng)
+        print(f"[{lab}] started (MT5 symbol {mt5s} @ {lots} lots"
+              f"{', engine ' + eng if eng else ''})")
     try:
         while True:
             time.sleep(2)
-            for name, mt5s, lots in specs:
-                p = procs[name]
+            for name, mt5s, lots, eng in specs:
+                lab = label_of(name, eng)
+                p = procs[lab]
                 if p.poll() is not None:
-                    print(f"[{name}] exited with code {p.returncode}; "
+                    print(f"[{lab}] exited with code {p.returncode}; "
                           f"restarting in 10s")
                     time.sleep(10)
-                    procs[name] = start(name, mt5s, lots)
+                    procs[lab] = start(name, mt5s, lots, eng)
     except KeyboardInterrupt:
         # on Windows/Unix the Ctrl-C also reaches the children (same console
         # group), so they save state and disconnect MT5 cleanly themselves
@@ -204,17 +226,23 @@ def main():
     specs = _parse_specs(args.symbols, args.mt5_symbol, args.lots)
     if len(specs) > 1:
         return _supervise(specs, _passthrough(sys.argv[1:]))
-    name, mt5_symbol, lots = specs[0]
+    name, mt5_symbol, lots, spec_engine = specs[0]
     args.lots = lots
+    if spec_engine:
+        args.engine = spec_engine
 
     import databento as db
 
     from core.symbols import get_symbol
     sym = get_symbol(name)
+    # engine-aware file names, so different engines on the SAME symbol
+    # (parallel terminals or one supervisor) never overwrite each other;
+    # lrev keeps the plain names for continuity
+    tag = sym["name"] if args.engine == "lrev" else f"{sym['name']}_{args.engine}"
     if args.trades_csv is None:
-        args.trades_csv = f"paper_trades_{sym['name']}.csv"
+        args.trades_csv = f"paper_trades_{tag}.csv"
     if args.state_json is None:
-        args.state_json = f"state_{sym['name']}.json"
+        args.state_json = f"state_{tag}.json"
     args.trades_csv = log_path(args.trades_csv)
     args.state_json = log_path(args.state_json)
 
@@ -222,7 +250,7 @@ def main():
     # into logs/live_<SYMBOL>_<start time>.log
     from datetime import datetime, timezone
     session_log = log_path(
-        f"live_{sym['name']}_{datetime.now(timezone.utc):%Y%m%d_%H%M%S}.log")
+        f"live_{tag}_{datetime.now(timezone.utc):%Y%m%d_%H%M%S}.log")
     _log_fh = open(session_log, "a", encoding="utf-8")
     sys.stdout = _Tee(sys.stdout, _log_fh)
     sys.stderr = _Tee(sys.stderr, _log_fh)
@@ -233,7 +261,8 @@ def main():
         from core.mt5_broker import MT5Broker
         print(f"note: {sym['mt5_lot_note']}")
         broker = MT5Broker(symbol=mt5_symbol, lots=args.lots,
-                           signal_symbol=sym["name"])
+                           signal_symbol=sym["name"],
+                           signal_log_path=log_path(f"mt5_signals_{tag}.csv"))
     else:
         broker = PaperBroker(trade_log_path=args.trades_csv,
                              cost_pts=args.cost,
