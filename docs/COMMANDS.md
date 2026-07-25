@@ -124,14 +124,7 @@ Add these to `run/backtest.py` or `run/live.py` — identical meaning in both:
 | `--flow-lo 0.0` `--flow-hi 0.6` | flow-gate band (aligned 30s imbalance; lrev/ldef) | 0.0–0.6 |
 | `--set KEY=VALUE` | override ANY engine config key (repeatable) — e.g. `--set delta_threshold=0.7 --set require_color=true`. Works for every engine; keys live in each engine file's CONFIG dict | — |
 
-Engine notes:
-
-- **gtrend / gtrend-lowdd** ignore the level-engine flags above — their
-  parameters were frozen on 2024-2025 data and live in `engines\gtrend.py`
-  (GTREND_CONFIG). One decision per day at the CME close (17:00 ET), fill at
-  the 18:00 ET reopen → ~3 trades per MONTH, days-long holds.
-- **delta** keys for `--set`: `delta_threshold` (0..1), `min_volume`,
-  `min_sl_dist`, `require_color`, `max_concurrent` — see `engines\delta.py`.
+Section 5 lists EVERY engine's own settings and how to change them.
 
 Workflow: validate a setting in backtest, then run live with the *exact same flags*:
 
@@ -145,7 +138,87 @@ always know what's being tested or traded.
 
 ---
 
-## 5. MT5 checks (before live trading) — `scripts/test_mt5.py`
+## 5. Engine-specific settings (all changeable via `--set KEY=VALUE`)
+
+Each engine's parameters live in a CONFIG dict at the top of its file.
+Any key can be overridden per run with `--set KEY=VALUE` (repeatable), in
+backtest AND live. Keys with a dedicated flag (noted below) can use either.
+
+### 5a. `lrev` — level-break engine (validated)
+
+| Key | Meaning | Default |
+|---|---|---|
+| `rr` | TP = SL distance × RR *(flag: `--rr`)* | 2.0 |
+| `fractal_bars` | bars each side of a swing to confirm a level | 8 |
+| `max_level_distance` | ignore levels further than $X from price | 200 |
+| `level_max_age_h` | drop levels older than N hours | 336 |
+| `order_max_age_h` | gate 1: cancel unfilled level after N h *(flag: `--order-age`)* | 35 |
+| `max_spread` | gate 2: skip when spread > $X *(flag: `--max-spread`)* | per-symbol |
+| `use_flow_gate` | gate 3 on/off *(flag: `--no-flow-gate` in live)* | true |
+| `flow_lo` / `flow_hi` | flow-gate band *(flags: `--flow-lo/hi`)* | 0.0 / 0.6 |
+| `flow_window_s` | flow imbalance window (seconds) | 30 |
+| `qty` | contracts per backtest fill | 1 |
+
+SL multipliers per timeframe: `--sl-m15 / --sl-h1 / --sl-h4` (1.5/0.5/0.5),
+timeframe selection: `--tf M15,H1`.
+
+### 5b. `ldef` — level-defend engine (tested negative — do not trade)
+
+All lrev keys, plus:
+
+| Key | Meaning | Default |
+|---|---|---|
+| `confirm_window_s` | seconds after a level touch to wait for defense confirmation | 90 |
+| `max_break_frac` | test may penetrate at most this × SL-distance beyond the level | 0.5 |
+| `flow_lo` / `flow_hi` | bounce-aligned defense flow band (own defaults) | 0.2 / 1.0 |
+
+### 5c. `gtrend` / `gtrend-lowdd` — daily trend-pullback (GC only)
+
+Parameters were FROZEN on 2024-2025 GC data — change them only for
+research, never for live, and never tune on your validation years.
+Ignores the lrev flags (`--sl-*`, `--tf`, `--flow-*`, `--order-age`).
+
+| Key | Meaning | Default (lowdd) |
+|---|---|---|
+| `z_entry` | min normalized daily move to call it a pullback | 0.5 (0.6) |
+| `z_cap` | max — beyond this it's a blow-off, no trade | 4.0 |
+| `trend_strength_min` | regime gate: MA-slope/ATR must exceed this | 0.5 |
+| `trend_win` | sessions in the trend MA | 50 |
+| `slope_lag` | sessions for the MA slope lookback | 10 |
+| `z_win` | sessions for ATR and \|ret\| normalization | 20 |
+| `stop_atr` | SL = this × ATR | 1.0 |
+| `target_atr` | TP = this × ATR (R:R = target/stop) | 1.5 |
+| `max_hold` | time stop after N held sessions | 10 |
+| `max_concurrent` | simultaneous positions | 2 (3) |
+| `qty` | size per entry in backtest | 0.5 (1/3) |
+| `allow_long` / `allow_short` | per-side kill switches | true |
+| `min_session_ticks` | drop illiquid/partial sessions from signals | 200 |
+
+```
+python run/backtest.py --engine gtrend --set allow_short=false   # long-only research
+```
+
+### 5d. `delta` — 1-min volume-delta breakout (UNTESTED)
+
+| Key | Meaning | Default |
+|---|---|---|
+| `delta_threshold` | min \|buy−sell\|/total aggressor volume, 0..1 (0.6 = 60% one-sided) | 0.6 |
+| `rr` | TP = RR × SL distance *(flag: `--rr`)* | 1.5 |
+| `min_volume` | classified contracts required in the candle | 50 |
+| `min_sl_dist` | min stop distance in points (skips candles that closed on their extreme) | 0.2 |
+| `require_color` | candle close must agree with delta direction (see engine header) | false |
+| `max_concurrent` | simultaneous open positions | 1 |
+| `max_spread` | skip entries when spread > $X *(flag: `--max-spread`)* | per-symbol |
+| `qty` | contracts per backtest fill | 1 |
+
+```
+python run/backtest.py --engine delta --set delta_threshold=0.75 --set min_volume=150 --rr 2.0
+python run/backtest.py --engine delta --set require_color=true
+```
+
+---
+
+## 6. MT5 checks (before live trading) — `scripts/test_mt5.py`
 
 | Option | Meaning | Default |
 |---|---|---|
@@ -163,7 +236,7 @@ Expert Advisors → "Allow algorithmic trading" enabled.
 
 ---
 
-## 6. Live trading — `run/live.py`
+## 7. Live trading — `run/live.py`
 
 ### All live options
 
@@ -231,7 +304,7 @@ Fri ~2:30 AM → Sun ~3:30 AM IST. Disable Windows sleep.
 
 ---
 
-## 7. Where things live
+## 8. Where things live
 
 | Path | What it is |
 |---|---|
@@ -251,7 +324,7 @@ Fri ~2:30 AM → Sun ~3:30 AM IST. Disable Windows sleep.
 
 ---
 
-## 8. A warning that belongs in every command file
+## 9. A warning that belongs in every command file
 
 When you sweep `--rr` / `--sl-*` / `--set` values, tune on one period
 (e.g. 2023–2024) and confirm on a period the tuning never saw (2025–2026).
