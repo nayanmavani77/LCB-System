@@ -33,23 +33,40 @@ MT5_SERVER = None         # e.g. your broker's server name
 
 ---
 
-## 2. Data (multi-symbol)
+## 2. Data — download & prepare
 
-| Command | What it does |
-|---|---|
-| `python scripts/prep.py` | build the GC cache from DBN files in `Data\` — run once, and again whenever you add data |
-| `python scripts/prep.py --symbol SI` | build another symbol's cache from `Data\SI\` |
-| `python scripts/download_data.py --symbol GC --start 2026-07-18 --end 2026-09-01` | download data from Databento into `Data\<SYMBOL>\` (then re-run prep.py for that symbol) |
+### 2a. `scripts/download_data.py` — download from Databento into `Data\<SYMBOL>\`
 
-Known symbols (add more in `core/symbols.py`, one dict entry each):
-GC (gold), SI (silver), HG (copper), PL (platinum), CL (WTI oil), NG (nat gas).
-Everything symbol-specific (Databento symbols, $/point, default spread gate,
-default cost, default MT5 symbol) lives in that registry — the strategy code
-never changes per symbol.
+| Option | Meaning | Default |
+|---|---|---|
+| `--symbol GC` | symbol from `core/symbols.py` (GC, SI, HG, PL, CL, NG) | GC |
+| `--start 2026-07-18` | first date to download (**required**) | — |
+| `--end 2026-09-01` | last date to download (**required**) | — |
+
+```
+python scripts/download_data.py --symbol GC --start 2026-07-18 --end 2026-09-01
+```
+
+### 2b. `scripts/prep.py` — build the tick/bar cache from the DBN files
+
+| Option | Meaning | Default |
+|---|---|---|
+| `--symbol GC` | which symbol's `Data\<SYMBOL>\` folder to process (GC also reads the legacy flat `Data\`) | GC |
+
+```
+python scripts/prep.py                # GC
+python scripts/prep.py --symbol SI    # another symbol
+```
+
+Run prep once after every download. Known symbols (add more in
+`core/symbols.py`, one dict entry each): GC (gold), SI (silver), HG (copper),
+PL (platinum), CL (WTI oil), NG (nat gas). Everything symbol-specific
+(Databento symbols, $/point, default spread gate, default cost, default MT5
+symbol) lives in that registry — the strategy code never changes per symbol.
 
 ---
 
-## 3. Backtest
+## 3. Backtest — `run/backtest.py`
 
 Basic form:
 
@@ -57,12 +74,18 @@ Basic form:
 python run/backtest.py --start YYYY-MM-DD --end YYYY-MM-DD
 ```
 
+### All backtest options
+
 | Option | Meaning | Default |
 |---|---|---|
 | `--start` / `--end` | date window (clamped to available data) | all data |
-| `--config` | `v2-flow` (all gates) / `v2-ea` (no flow gate) / `v1` (no gates) | `v2-flow` |
-| `--csv FILE.csv` | save every trade to a CSV | off |
+| `--symbols GC,SI` (alias `--symbol`) | one symbol → full report; comma list → per-symbol reports + combined portfolio (joint $ P&L, joint max DD) | GC |
+| `--engine` | `lrev` (validated level-break) / `ldef` (defend, tested negative) / `gtrend` (daily trend-pullback) / `gtrend-lowdd` / `delta` (1-min volume delta, UNTESTED) | lrev |
+| `--config` | lrev gate presets: `v2-flow` (all gates) / `v2-ea` (no flow gate) / `v1` (no gates) | v2-flow |
+| `--csv FILE.csv` | save every trade to a CSV (written into `logs\`; one file per symbol when multi-symbol) | off |
+| `--cost 0.4` | commission+slippage per round turn in points (spread is separately embedded in fills) | per-symbol value from `core/symbols.py` |
 | `--verbose` | print every level, gate decision and fill | off |
+| *strategy flags* | all of section 4 (`--rr`, `--sl-*`, `--set KEY=VALUE`, ...) work here too | — |
 
 Examples:
 
@@ -81,12 +104,6 @@ python run/backtest.py --engine delta --set delta_threshold=0.7 --rr 2.0
                                                               # 1-min volume-delta engine (UNTESTED)
 ```
 
-ONE command for everything: one symbol -> full detailed report; several
-symbols (comma-separated) -> detailed report per symbol plus a combined
-portfolio section showing net $, PF and the JOINT max drawdown as if all
-symbols ran in parallel in one account. With --csv and multiple symbols,
-one file per symbol is written (trades_GC.csv, trades_SI.csv, ...).
-`--cost` and `--max-spread` default to per-symbol values from `core/symbols.py`.
 All generated CSVs land in `logs\` (give an absolute path to override).
 
 ---
@@ -97,21 +114,24 @@ Add these to `run/backtest.py` or `run/live.py` — identical meaning in both:
 
 | Flag | Meaning | Default |
 |---|---|---|
-| `--rr 3.0` | take-profit = SL distance × RR | 2.0 |
-| `--sl-m15 1.0` | M15 stop = multiplier × median true range | 1.5 |
-| `--sl-h1 0.5` | H1 stop multiplier | 0.5 |
-| `--sl-h4 0.5` | H4 stop multiplier | 0.5 |
-| `--tf M15,H1` | trade only these timeframes | M15,H1,H4 |
-| `--max-spread 0.9` | skip triggers when spread > $X (0 = off) | 0.90 |
-| `--order-age 35` | cancel unfilled level after N hours (0 = off) | 35 |
-| `--flow-lo 0.0` `--flow-hi 0.6` | flow-gate band (aligned 30s imbalance) | 0.0–0.6 |
+| `--rr 3.0` | take-profit = SL distance × RR (lrev/ldef/delta) | 2.0 (delta: 1.5) |
+| `--sl-m15 1.0` | M15 stop = multiplier × median true range (lrev/ldef) | 1.5 |
+| `--sl-h1 0.5` | H1 stop multiplier (lrev/ldef) | 0.5 |
+| `--sl-h4 0.5` | H4 stop multiplier (lrev/ldef) | 0.5 |
+| `--tf M15,H1` | trade only these timeframes (lrev/ldef) | M15,H1,H4 |
+| `--max-spread 0.9` | skip triggers when spread > $X (0 = off) | per-symbol registry value |
+| `--order-age 35` | cancel unfilled level after N hours (0 = off; lrev/ldef) | 35 |
+| `--flow-lo 0.0` `--flow-hi 0.6` | flow-gate band (aligned 30s imbalance; lrev/ldef) | 0.0–0.6 |
 | `--set KEY=VALUE` | override ANY engine config key (repeatable) — e.g. `--set delta_threshold=0.7 --set require_color=true`. Works for every engine; keys live in each engine file's CONFIG dict | — |
 
-NOTE: these flags configure the L-Rev/L-Def level engines. The G-Trend
-engine ignores them - its parameters were frozen on 2024-2025 data and live
-in `engines\gtrend.py` (GTREND_CONFIG). It decides once per day at the CME
-close (17:00 ET) and fills at the 18:00 ET reopen, so expect ~3 trades per
-MONTH and days-long holds; heartbeats show its trend/strength state.
+Engine notes:
+
+- **gtrend / gtrend-lowdd** ignore the level-engine flags above — their
+  parameters were frozen on 2024-2025 data and live in `engines\gtrend.py`
+  (GTREND_CONFIG). One decision per day at the CME close (17:00 ET), fill at
+  the 18:00 ET reopen → ~3 trades per MONTH, days-long holds.
+- **delta** keys for `--set`: `delta_threshold` (0..1), `min_volume`,
+  `min_sl_dist`, `require_color`, `max_concurrent` — see `engines\delta.py`.
 
 Workflow: validate a setting in backtest, then run live with the *exact same flags*:
 
@@ -125,60 +145,74 @@ always know what's being tested or traded.
 
 ---
 
-## 5. MT5 checks (before live trading)
+## 5. MT5 checks (before live trading) — `scripts/test_mt5.py`
 
-| Command | What it does |
-|---|---|
-| `python scripts/test_mt5.py --symbol XAUUSD+` | verify terminal connection, account, algo-trading setting, symbol, live spread |
-| `python scripts/test_mt5.py --symbol XAUUSD+ --place-test-order` | full order round-trip: opens + closes a 0.01-lot test position (DEMO accounts only — refuses on real) |
+| Option | Meaning | Default |
+|---|---|---|
+| `--symbol XAUUSD+` | MT5 symbol to check (connection, account, algo-trading setting, live spread) | XAUUSD |
+| `--lots 0.01` | size used by the test order | 0.01 |
+| `--place-test-order` | full order round-trip: opens + closes a test position (DEMO accounts only — refuses on real) | off |
+
+```
+python scripts/test_mt5.py --symbol XAUUSD+
+python scripts/test_mt5.py --symbol XAUUSD+ --place-test-order
+```
 
 MT5 terminal must be **running and logged in**, with Tools → Options →
 Expert Advisors → "Allow algorithmic trading" enabled.
 
 ---
 
-## 6. Live trading
+## 6. Live trading — `run/live.py`
 
-| Command | What it does |
-|---|---|
-| `python run/live.py` | GC live signals, **paper fills** (no broker, always safe) |
-| `python run/live.py --broker mt5 --mt5-symbol XAUUSD+ --lots 0.01` | GC signals, **real orders into MT5** |
-| `python run/live.py --symbol SI --broker mt5 --mt5-symbol XAGUSD --lots 0.01` | another symbol end-to-end (VALIDATE IN BACKTEST FIRST) |
-| `python run/live.py --broker mt5 --symbols GC:XAUUSD+:0.01,SI:XAGUSD+:0.02` | **MULTI-SYMBOL in ONE terminal** — per-symbol MT5 symbol and lots |
-| `python run/live.py --no-flow-gate` | run the v2-ea configuration live |
+### All live options
 
-Multi-symbol format: `--symbols NAME[:MT5SYMBOL[:LOTS[:ENGINE]]],...` —
-leave a field empty to use the default (`core/symbols.py` registry for the
-MT5 symbol, `--lots` for lots, `--engine` for the engine). Every other flag
-(`--rr`, `--tf`, `--no-flow-gate`, ...) applies to ALL entries. Each entry
-runs as its own child process: every line is prefixed `[GC]` / `[GC/ldef]`,
-a child that dies is restarted automatically after 10s, one child's crash
-never stops the others, and Ctrl-C stops all of them cleanly.
+| Option | Meaning | Default |
+|---|---|---|
+| `--broker` | `paper` (simulated fills, always safe) or `mt5` (real orders) | paper |
+| `--symbols GC` (alias `--symbol`) | what to trade; comma list runs MULTI-SYMBOL/MULTI-ENGINE in one terminal. Per-entry format: `NAME[:MT5SYMBOL[:LOTS[:ENGINE]]]` | GC |
+| `--engine` | `lrev` / `ldef` / `gtrend` / `gtrend-lowdd` / `delta` | lrev |
+| `--mt5-symbol XAUUSD+` | MT5 symbol override | registry (GC→XAUUSD) |
+| `--lots 0.01` | lots per entry (per-symbol override via `--symbols`) | 0.01 |
+| `--no-flow-gate` | run the v2-ea configuration live (lrev) | off |
+| `--cost 0.4` | paper-mode commission+slippage per round turn (points) | 0.4 |
+| `--trades-csv F` | paper trade log path | `logs\paper_trades_<SYM>.csv` |
+| `--state-json F` | state snapshot path (written on exit) | `logs\state_<SYM>.json` |
+| *strategy flags* | all of section 4 (`--rr`, `--sl-*`, `--set`, ...) | — |
 
-Multiple ENGINES also work — in one terminal or in separate ones:
+Examples:
 
 ```
-python run/live.py --broker mt5 --symbols GC:XAUUSD+:0.01:lrev,GC:XAUUSD+:0.01:ldef
+python run/live.py                                            # GC paper (always safe)
+python run/live.py --broker mt5 --mt5-symbol XAUUSD+ --lots 0.01     # real orders
+python run/live.py --symbol SI --broker mt5 --mt5-symbol XAGUSD --lots 0.01
+python run/live.py --broker mt5 --symbols GC:XAUUSD+:0.01,SI:XAGUSD+:0.02   # multi-symbol
+python run/live.py --broker mt5 --symbols GC:XAUUSD+:0.01:lrev,GC:XAUUSD+:0.01:gtrend
+                                                              # multi-ENGINE, one terminal
+python run/live.py --no-flow-gate                             # v2-ea config live
 ```
 
-runs both engines on gold side by side. Output files are engine-aware so
-parallel engines never overwrite each other: lrev keeps the plain names
-(`mt5_signals_GC.csv`, `state_GC.json`), every other engine gets a suffix
-(`mt5_signals_GC_ldef.csv`, `state_GC_ldef.json`, `live_GC_ldef_*.log`).
-The same holds if you simply open two terminals with different `--engine`
-values instead.
+Multi-symbol/engine: leave a spec field empty to use the default
+(`core/symbols.py` for the MT5 symbol, `--lots`, `--engine`). Every other
+flag applies to ALL entries. Each entry runs as its own child process:
+lines are prefixed `[GC]` / `[GC/gtrend]`, a child that dies restarts
+automatically after 10s, one child's crash never stops the others, Ctrl-C
+stops all. Output files are engine-aware so parallel engines never
+overwrite each other: lrev keeps the plain names (`mt5_signals_GC.csv`,
+`state_GC.json`), every other engine gets a suffix
+(`mt5_signals_GC_gtrend.csv`, `state_GC_gtrend.json`, `live_GC_gtrend_*.log`).
+The same holds if you simply open two terminals with different `--engine`.
 
-MT5 signal logs are per symbol: `logs\mt5_signals_GC.csv`, `logs\mt5_signals_SI.csv`, ...
-WARNING: the strategy settings were validated on GC ONLY. For any other
-symbol, backtest thoroughly (download data -> prep -> backtest, ideally
-multiple years) before paper trading it, and paper trade before real money.
-Also verify your broker's CFD lot size equals the futures contract size —
-GC/XAUUSD match 1:1, but e.g. oil CFDs are often 1/10th of a CL contract.
+WARNING: strategy settings were validated on GC ONLY. For any other symbol,
+backtest thoroughly (download → prep → backtest, ideally multiple years)
+before paper trading it, and paper trade before real money. Also verify your
+broker's CFD lot size equals the futures contract size — GC/XAUUSD match
+1:1, but e.g. oil CFDs are often 1/10th of a CL contract.
 
 While running you'll see: a `[heartbeat]` line every minute (tick count,
-GC quote, flow, armed levels — proof data is flowing), `[M15] level ...`
-lines when swings are detected, gate `SKIPPED` lines, and order fills.
-Stop with **Ctrl-C** — open MT5 positions keep their server-side SL/TP.
+quote, engine status — proof data is flowing), signal/level lines, gate
+`SKIPPED` lines, and order fills. Stop with **Ctrl-C** — open MT5 positions
+keep their server-side SL/TP.
 
 Files written (all in `logs\`): `paper_trades_<SYMBOL>.csv` (paper mode
 trade log), `state_<SYMBOL>.json` (state snapshot on exit),
@@ -186,14 +220,14 @@ trade log), `state_<SYMBOL>.json` (state snapshot on exit),
 `live_<SYMBOL>_<start time>.log` (full copy of everything the session
 printed — one file per run, survives after the terminal is closed).
 
-If the data stream drops (network outage, PC slept), live.py now
-reconnects on its own: it saves state, retries after 5s → 15s → 60s →
-5 min, and keeps trying until the stream is back. You lose signals only
-while the connection is actually down.
+If the data stream drops (network outage, PC slept), live.py reconnects on
+its own: it saves state, retries after 5s → 15s → 60s → 5 min, and keeps
+trying until the stream is back. You lose signals only while the connection
+is actually down.
 
-Good to know: ~3–5 signals/day with long quiet stretches is normal.
-GC halts daily ~2:30–3:30 AM IST and weekends Fri ~2:30 AM → Sun ~3:30 AM IST.
-Disable Windows sleep. If the stream dies, just run the command again.
+Good to know: lrev makes ~3–5 signals/day, gtrend ~3/MONTH — long quiet
+stretches are normal. GC halts daily ~2:30–3:30 AM IST and weekends
+Fri ~2:30 AM → Sun ~3:30 AM IST. Disable Windows sleep.
 
 ---
 
@@ -203,7 +237,7 @@ Disable Windows sleep. If the stream dies, just run the command again.
 |---|---|
 | `engines\lrev.py` | THE validated strategy (single source of truth, backtest + live) |
 | `engines\ldef.py` | experimental defend engine (tested negative - do not trade) |
-| `engines\gtrend.py` | G-Trend: daily trend-pullback engine (spec: `docs\GTREND_SPEC.md`; validate on your data before live) |
+| `engines\gtrend.py` | G-Trend: daily trend-pullback engine (spec: `docs\GTREND_SPEC.md`; GC only — SI tested negative) |
 | `engines\delta.py` | Delta-1m: 1-min volume-delta breakout (UNTESTED — backtest before any live use; params via `--set`) |
 | `engines\__init__.py` | engine registry - add new strategies here |
 | `core\` | shared machinery: brokers, data/replay, reports, CLI flags, symbols, paths |
@@ -219,8 +253,8 @@ Disable Windows sleep. If the stream dies, just run the command again.
 
 ## 8. A warning that belongs in every command file
 
-When you sweep `--rr` / `--sl-*` values, tune on one period (e.g. 2023–2024)
-and confirm on a period the tuning never saw (2025–2026). A setting that only
-wins in one exact combination is noise. And remember the 2023–2026 result:
-this strategy only earned in high-volatility regimes — paper/demo first,
-small size always.
+When you sweep `--rr` / `--sl-*` / `--set` values, tune on one period
+(e.g. 2023–2024) and confirm on a period the tuning never saw (2025–2026).
+A setting that only wins in one exact combination is noise. And remember
+the 2023–2026 result: L-Rev only earned in high-volatility regimes —
+paper/demo first, small size always.
