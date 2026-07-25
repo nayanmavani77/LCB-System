@@ -25,6 +25,9 @@ def add_strategy_args(ap):
                    help="flow gate lower bound (default 0.0)")
     g.add_argument("--flow-hi", type=float, default=None,
                    help="flow gate upper bound (default 0.6)")
+    g.add_argument("--set", action="append", default=[], metavar="KEY=VALUE",
+                   help="override ANY engine config key, repeatable - e.g. "
+                        "--set delta_threshold=0.7 --set require_color=true")
 
 
 def config_from_args(args, base: dict | None = None) -> dict:
@@ -62,6 +65,19 @@ def config_from_args(args, base: dict | None = None) -> dict:
         cfg["flow_lo"] = args.flow_lo
     if getattr(args, "flow_hi", None) is not None:
         cfg["flow_hi"] = args.flow_hi
+    for kv in getattr(args, "set", None) or []:
+        key, sep, raw = kv.partition("=")
+        key, raw = key.strip(), raw.strip()
+        if not sep or not key:
+            raise SystemExit(f"--set expects KEY=VALUE, got '{kv}'")
+        try:
+            val = int(raw)
+        except ValueError:
+            try:
+                val = float(raw)
+            except ValueError:
+                val = {"true": True, "false": False}.get(raw.lower(), raw)
+        cfg[key] = val
     return cfg
 
 

@@ -77,6 +77,8 @@ python run/backtest.py --config v1                            # original ungated
 python run/backtest.py --engine ldef                          # experimental defend engine
 python run/backtest.py --engine gtrend --start 2024-01-01     # daily trend-pullback engine
 python run/backtest.py --engine gtrend-lowdd                  # same rules, LOW-DD sizing
+python run/backtest.py --engine delta --set delta_threshold=0.7 --rr 2.0
+                                                              # 1-min volume-delta engine (UNTESTED)
 ```
 
 ONE command for everything: one symbol -> full detailed report; several
@@ -103,6 +105,7 @@ Add these to `run/backtest.py` or `run/live.py` — identical meaning in both:
 | `--max-spread 0.9` | skip triggers when spread > $X (0 = off) | 0.90 |
 | `--order-age 35` | cancel unfilled level after N hours (0 = off) | 35 |
 | `--flow-lo 0.0` `--flow-hi 0.6` | flow-gate band (aligned 30s imbalance) | 0.0–0.6 |
+| `--set KEY=VALUE` | override ANY engine config key (repeatable) — e.g. `--set delta_threshold=0.7 --set require_color=true`. Works for every engine; keys live in each engine file's CONFIG dict | — |
 
 NOTE: these flags configure the L-Rev/L-Def level engines. The G-Trend
 engine ignores them - its parameters were frozen on 2024-2025 data and live
@@ -201,6 +204,7 @@ Disable Windows sleep. If the stream dies, just run the command again.
 | `engines\lrev.py` | THE validated strategy (single source of truth, backtest + live) |
 | `engines\ldef.py` | experimental defend engine (tested negative - do not trade) |
 | `engines\gtrend.py` | G-Trend: daily trend-pullback engine (spec: `docs\GTREND_SPEC.md`; validate on your data before live) |
+| `engines\delta.py` | Delta-1m: 1-min volume-delta breakout (UNTESTED — backtest before any live use; params via `--set`) |
 | `engines\__init__.py` | engine registry - add new strategies here |
 | `core\` | shared machinery: brokers, data/replay, reports, CLI flags, symbols, paths |
 | `run\backtest.py` / `run\live.py` | the two runners (same engines, same flags) |

@@ -19,6 +19,7 @@ ldef.py). Optional class attribute CLI_DEFAULTS = {...} declares config
 overrides the runners apply as the engine's base (explicit CLI flags still
 win) - e.g. ldef sets its own flow band and engine_name there.
 """
+from .delta import DeltaStrategy
 from .gtrend import GTrendLowDD, GTrendStrategy
 from .ldef import DEFEND_CONFIG, LDefStrategy
 from .lrev import DEFAULT_CONFIG, Bar, LRevStrategy, TF_SECONDS
@@ -28,4 +29,5 @@ ENGINES = {
     "ldef": LDefStrategy,       # level-DEFEND engine (experimental; tested negative)
     "gtrend": GTrendStrategy,   # daily trend-pullback PRIMARY (spec: docs/GTREND_SPEC.md)
     "gtrend-lowdd": GTrendLowDD,  # same rules, LOW-DD sizing (3 x 1/3, z>=0.6)
+    "delta": DeltaStrategy,     # 1-min volume-delta breakout (UNTESTED - backtest first)
 }
