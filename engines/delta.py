@@ -34,12 +34,16 @@ from __future__ import annotations
 
 import json
 
+from .gtrend import _session_end_ns   # DST-aware CME 17:00-ET boundary
+
 DELTA_CONFIG = {
     "delta_threshold": 0.6,   # |delta%| needed, 0..1 (0.6 = 60% one-sided)
     "rr": 1.5,                # TP = RR x SL distance
     "min_volume": 50,         # classified contracts required in the candle
     "min_sl_dist": 0.2,       # points; skip if the candle gives a ~zero stop
     "require_color": False,   # candle close must agree with delta direction
+    "vwap_filter": "off",     # "off" | "with" (long above session VWAP,
+                              #  short below) | "against" (the inverse)
     "max_concurrent": 1,      # simultaneous open positions
     "max_spread": 0.9,        # skip entries when quoted spread > this ($)
     "qty": 1,
@@ -74,6 +78,10 @@ class DeltaStrategy:
         self._t0 = None          # candle open time (ns, minute-aligned)
         self._o = self._h = self._l = self._c = None
         self._buy = self._sell = 0.0
+        # session-anchored VWAP (resets at the CME 17:00-ET boundary)
+        self._vwap_end = None
+        self._pv = 0.0
+        self._v = 0.0
         # last completed candle's stats (for status/state)
         self._last = None
         self._n_signals = 0
@@ -86,6 +94,12 @@ class DeltaStrategy:
     def on_tick(self, ts: int, price: float, size: float, side: str,
                 bid: float, ask: float):
         self.now, self.bid, self.ask = ts, bid, ask
+        # session VWAP bookkeeping (every trade, classified or not)
+        if self._vwap_end is None or ts >= self._vwap_end:
+            self._vwap_end = _session_end_ns(ts)
+            self._pv = self._v = 0.0          # new session -> fresh VWAP
+        self._pv += price * size
+        self._v += size
         t0 = ts - ts % _MIN_NS
         if self._t0 is None:
             self._start(t0, price)
@@ -126,6 +140,17 @@ class DeltaStrategy:
                 return
             if direction < 0 and c >= o:
                 return
+        mode = cfg["vwap_filter"]
+        if mode != "off" and self._v > 0:
+            vwap = self._pv / self._v
+            above = c > vwap
+            aligned = (direction > 0) == above    # long above / short below
+            want = (mode == "with")
+            if aligned != want:
+                self.log(f"[Delta-1m] SKIPPED delta {delta:+.2f}: close "
+                         f"{c:.2f} vs session VWAP {vwap:.2f} "
+                         f"fails '{mode}' filter")
+                return
         spread = self.ask - self.bid
         if cfg["max_spread"] > 0 and spread == spread \
                 and spread > cfg["max_spread"]:
@@ -156,19 +181,22 @@ class DeltaStrategy:
         n_open = self.broker.open_count(cfg["tag_prefix"] + "|")
         if self._last is None:
             return "Delta-1m: waiting for first candle"
+        vw = f" | vwap {self._pv / self._v:.2f}" if self._v > 0 else ""
         return (f"last delta {self._last['delta']:+.2f} "
-                f"(thr {cfg['delta_threshold']}) | vol {self._last['vol']:.0f} | "
-                f"{self._n_signals} signals | "
+                f"(thr {cfg['delta_threshold']}) | vol {self._last['vol']:.0f}"
+                f"{vw} | {self._n_signals} signals | "
                 f"{n_open}/{cfg['max_concurrent']} open")
 
     @staticmethod
     def describe(cfg) -> str:
         col = " | candle color must agree" if cfg["require_color"] else ""
+        vw = ("" if cfg["vwap_filter"] == "off"
+              else f" | VWAP filter: {cfg['vwap_filter']}")
         return (f"{cfg.get('engine_name', 'Delta-1m')} | 1-min volume delta "
                 f">= {cfg['delta_threshold']:.0%} | SL = candle extreme, "
                 f"TP = {cfg['rr']} x risk | vol >= {cfg['min_volume']} | "
                 f"spread <= {cfg['max_spread']} | "
-                f"max {cfg['max_concurrent']} open{col}")
+                f"max {cfg['max_concurrent']} open{col}{vw}")
 
     def save_state(self, path):
         with open(path, "w") as f:

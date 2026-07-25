@@ -207,6 +207,7 @@ python run/backtest.py --engine gtrend --set allow_short=false   # long-only res
 | `min_volume` | classified contracts required in the candle | 50 |
 | `min_sl_dist` | min stop distance in points (skips candles that closed on their extreme) | 0.2 |
 | `require_color` | candle close must agree with delta direction (see engine header) | false |
+| `vwap_filter` | `off` / `with` (long only above session VWAP, short only below — trade with the session's flow) / `against` (the inverse). VWAP is anchored at the CME session start and resets daily | off |
 | `max_concurrent` | simultaneous open positions | 1 |
 | `max_spread` | skip entries when spread > $X *(flag: `--max-spread`)* | per-symbol |
 | `qty` | contracts per backtest fill | 1 |
@@ -214,6 +215,7 @@ python run/backtest.py --engine gtrend --set allow_short=false   # long-only res
 ```
 python run/backtest.py --engine delta --set delta_threshold=0.75 --set min_volume=150 --rr 2.0
 python run/backtest.py --engine delta --set require_color=true
+python run/backtest.py --engine delta --set vwap_filter=with --set delta_threshold=0.7 --rr 2.0
 ```
 
 ---
