@@ -318,8 +318,11 @@ its own terminal alongside live trading.
 | `--symbol GC` | symbol from `core/symbols.py` | GC |
 | `--schema` | `tbbo` (trade + best bid/ask) / `trades` / `mbp-1` (top of book) / `mbp-10` (10-level depth) / `mbo` (every order event) | tbbo |
 | `--min-size 10` | print only trades of at least this many contracts (CVD still counts everything) | 0 |
-| `--quiet` | no tape — only the per-minute summary lines | off |
+| `--quiet` | no tape — only per-minute summaries and BIG alerts | off |
 | `--book-secs 1.0` | min seconds between book snapshots (mbp schemas) | 1.0 |
+| `--big-mult 10` | BIG alert when a print/sweep ≥ this × the rolling average trade size | 10 |
+| `--big-min 20` | absolute floor for a BIG alert (contracts) | 20 |
+| `--sweep-ms 50` | same-side fills within this many ms cluster into ONE sweep and are judged by their sum | 50 |
 
 ```
 python run/watch.py                                   # GC TBBO tape + CVD
@@ -330,13 +333,22 @@ python run/watch.py --min-size 10                     # big prints only
 ```
 
 What you see: every trade (`12:34:56.789  BUY  12 @ 4052.30  CVD +1,234
-[4052.2/4052.4]`), a `[1m]` summary each minute (OHLC, volume, minute
-delta, CVD, trade count — plus add/cancel/modify counters on mbo), book
-snapshots on the mbp schemas (mbp-10 shows total bid vs ask depth and the
-imbalance %), and a session total on Ctrl-C. Auto-reconnects if the stream
-drops. Schema availability depends on your Databento license; note that on
-`mbo`, only trade events feed the CVD (a resting ask-side add is a quote,
-not a sale).
+[4052.2/4052.4]`), **BIG-trade alerts** — single large prints AND sweeps
+(one aggressor's burst of same-side fills within `--sweep-ms`, judged by
+their SUM):
+
+```
+>>> BIG SELL sweep 142 @ 4052.10->4051.60 in 38ms (n=14, 31x avg)  CVD -890
+>>> BIG BUY  print 45 @ 4051.00 (n=1, 19x avg)  CVD +45
+```
+
+plus a `[1m]` summary each minute (OHLC, volume, minute delta, CVD, trade
+count, big-trade counters `big 3B/1S +180` — and add/cancel/modify counters
+on mbo), book snapshots on the mbp schemas (mbp-10 shows total bid vs ask
+depth and the imbalance %), and a session total on Ctrl-C including big-buy
+vs big-sell volume. Auto-reconnects if the stream drops. Schema
+availability depends on your Databento license; note that on `mbo`, only
+trade events feed the CVD (a resting ask-side add is a quote, not a sale).
 
 ---
 

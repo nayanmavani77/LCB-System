@@ -11,6 +11,11 @@ What you see:
   - every trade: time, side, size, price, running CVD (buy vol - sell vol,
     reset at the DST-aware CME session boundary, 17:00 ET), plus best
     bid/ask when the schema carries a book
+  - BIG-TRADE ALERTS (shown even with --quiet): single prints AND sweeps -
+    consecutive same-side fills within --sweep-ms are clustered into one
+    aggressor order and judged by their SUM. Big = >= --big-mult x the
+    rolling average trade size, with an absolute floor of --big-min.
+    e.g.  >>> BIG SELL sweep 142 @ 4052.10->4051.60 in 38ms (n=14, 31x avg)
   - book schemas (mbp-1 / mbp-10): a top-of-book / depth snapshot at most
     once per --book-secs; mbp-10 shows total bid vs ask depth + imbalance
   - mbo: per-second add/cancel/modify counters (plus every trade)
@@ -71,7 +76,8 @@ class Tape:
     tape. Separated from the network loop so it is unit-testable."""
 
     def __init__(self, schema, out=print, min_size=0.0, quiet=False,
-                 book_secs=1.0, clock=time.monotonic):
+                 book_secs=1.0, clock=time.monotonic,
+                 big_mult=10.0, big_min=20.0, sweep_ms=50.0):
         from engines.gtrend import _session_end_ns
         self._session_end_ns = _session_end_ns
         self.schema = schema
@@ -80,6 +86,13 @@ class Tape:
         self.quiet = quiet
         self.book_secs = book_secs
         self.clock = clock
+        # big-trade / sweep detection
+        self.big_mult = big_mult       # big if >= this x rolling avg size...
+        self.big_min = big_min         # ...and always at least this many
+        self.sweep_ns = sweep_ms * 1e6
+        self.avg_size = None           # EMA of trade sizes
+        self._cl = None                # running same-side sweep cluster
+        self.big = dict(nb=0, vb=0.0, ns=0, vs=0.0)   # session big counters
         # session state
         self.sess_end = None
         self.cvd = 0.0
@@ -99,10 +112,12 @@ class Tape:
             return
         if self.sess_end is None or ts >= self.sess_end:
             if self.sess_end is not None:
+                self._flush_cluster()
                 self._session_close()
             self.sess_end = self._session_end_ns(ts)
             self.cvd = self.sess_vol = 0.0
             self.sess_trades = 0
+            self.big = dict(nb=0, vb=0.0, ns=0, vs=0.0)
             self.out(f"--- new CME session (CVD reset) ---")
 
         # book levels, if the schema carries them
@@ -131,6 +146,22 @@ class Tape:
 
     def _trade(self, ts, px, size, side):
         sgn = 1 if side == "B" else (-1 if side == "A" else 0)
+        # sweep clustering: consecutive same-side fills within sweep_ms are
+        # ONE aggressor order eating the book - judge the SUM, not the parts
+        if self._cl is not None and (side != self._cl["side"]
+                                     or ts - self._cl["t1"] > self.sweep_ns):
+            self._flush_cluster()
+        if sgn != 0:
+            if self._cl is None:
+                self._cl = dict(side=side, t0=ts, t1=ts, size=0.0,
+                                px0=px, px1=px, n=0)
+            self._cl["t1"] = ts
+            self._cl["px1"] = px
+            self._cl["size"] += size
+            self._cl["n"] += 1
+        # rolling average trade size (EMA, slow)
+        self.avg_size = (size if self.avg_size is None
+                         else self.avg_size * 0.99 + size * 0.01)
         self.cvd += sgn * size
         self.sess_vol += size
         self.sess_trades += 1
@@ -154,6 +185,34 @@ class Tape:
                 if self.bid is not None and self.ask is not None else "")
         self.out(f"{_hms(ts)}  {tag} {size:>6.0f} @ {px:<9.2f} "
                  f"CVD {self.cvd:+10,.0f}{book}")
+
+    def _flush_cluster(self):
+        """Close the running sweep cluster; alert if it was BIG. Alerts
+        print even in --quiet mode - they are the point of watching."""
+        cl, self._cl = self._cl, None
+        if cl is None:
+            return
+        thr = max(self.big_min,
+                  (self.avg_size or 0.0) * self.big_mult)
+        if cl["size"] < thr:
+            return
+        buy = cl["side"] == "B"
+        if buy:
+            self.big["nb"] += 1
+            self.big["vb"] += cl["size"]
+        else:
+            self.big["ns"] += 1
+            self.big["vs"] += cl["size"]
+        mult = (f", {cl['size'] / self.avg_size:.0f}x avg"
+                if self.avg_size else "")
+        px = (f"{cl['px0']:.2f}" if cl["n"] == 1
+              else f"{cl['px0']:.2f}->{cl['px1']:.2f}")
+        dur = (f" in {(cl['t1'] - cl['t0']) / 1e6:.0f}ms"
+               if cl["n"] > 1 else "")
+        kind = "sweep" if cl["n"] > 1 else "print"
+        self.out(f">>> BIG {'BUY ' if buy else 'SELL'} {kind} "
+                 f"{cl['size']:,.0f} @ {px}{dur} "
+                 f"(n={cl['n']}{mult})  CVD {self.cvd:+,.0f}")
 
     # ------------------------------------------------------------- output
     def _book_line(self, levels):
@@ -184,16 +243,23 @@ class Tape:
             extra = (f" | +{self.counts['A']} adds "
                      f"-{self.counts['C']} cxl ~{self.counts['M']} mod")
             self.counts = dict(A=0, C=0, M=0)
+        b = self.big
+        bigs = (f" | big {b['nb']}B/{b['ns']}S {b['vb'] - b['vs']:+,.0f}"
+                if b["nb"] or b["ns"] else "")
         self.out(f"[1m {t}] O {m['o']:.2f} H {m['h']:.2f} L {m['l']:.2f} "
                  f"C {m['c']:.2f} | vol {m['vol']:,.0f} "
                  f"delta {m['delta']:+,.0f} | CVD {self.cvd:+,.0f} | "
-                 f"{m['n']} trades{extra}")
+                 f"{m['n']} trades{bigs}{extra}")
 
     def _session_close(self):
+        b = self.big
         self.out(f"=== session done: vol {self.sess_vol:,.0f}, "
-                 f"CVD {self.cvd:+,.0f}, {self.sess_trades} trades ===")
+                 f"CVD {self.cvd:+,.0f}, {self.sess_trades} trades | "
+                 f"big: {b['nb']} buys {b['vb']:+,.0f} / "
+                 f"{b['ns']} sells {-b['vs']:+,.0f} ===")
 
     def summary(self):
+        self._flush_cluster()
         if self.m_t0 is not None:
             self._minute_line()
         self._session_close()
@@ -212,6 +278,15 @@ def main():
                     help="no tape - only the [1m] summary lines")
     ap.add_argument("--book-secs", type=float, default=1.0,
                     help="min seconds between book snapshots (mbp schemas)")
+    ap.add_argument("--big-mult", type=float, default=10.0,
+                    help="BIG alert when a print/sweep >= this x the rolling "
+                         "average trade size (default 10)")
+    ap.add_argument("--big-min", type=float, default=20.0,
+                    help="absolute floor for a BIG alert in contracts "
+                         "(default 20)")
+    ap.add_argument("--sweep-ms", type=float, default=50.0,
+                    help="same-side fills within this many ms cluster into "
+                         "one sweep (default 50)")
     args = ap.parse_args()
 
     import databento as db
@@ -220,7 +295,8 @@ def main():
     sym = get_symbol(args.symbol)
     key = get_api_key()
     tape = Tape(args.schema, min_size=args.min_size, quiet=args.quiet,
-                book_secs=args.book_secs)
+                book_secs=args.book_secs, big_mult=args.big_mult,
+                big_min=args.big_min, sweep_ms=args.sweep_ms)
     print(f"watching {sym['name']} ({sym['continuous']}) schema={args.schema}"
           f" | CVD resets at the CME session boundary | Ctrl-C to stop")
     while True:
