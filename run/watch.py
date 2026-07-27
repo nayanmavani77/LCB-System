@@ -59,6 +59,27 @@ def get_api_key():
     return key
 
 
+class _Tee:
+    """Mirror everything written to a stream into a log file as well."""
+    def __init__(self, stream, fh):
+        self._s, self._f = stream, fh
+
+    def write(self, data):
+        self._s.write(data)
+        try:
+            self._f.write(data)
+            self._f.flush()
+        except Exception:
+            pass                     # never let logging kill the stream
+
+    def flush(self):
+        self._s.flush()
+        try:
+            self._f.flush()
+        except Exception:
+            pass
+
+
 def _px(raw):
     """Databento fixed-precision int -> float, None if undefined."""
     if raw is None or raw == _UNDEF:
@@ -291,9 +312,22 @@ def main():
 
     import databento as db
 
+    from core.paths import log_path
     from core.symbols import get_symbol
     sym = get_symbol(args.symbol)
     key = get_api_key()
+
+    # mirror the whole session (tape, BIG alerts, summaries, errors) into
+    # logs/watch_<SYMBOL>_<schema>_<start time>.log
+    from datetime import datetime, timezone
+    session_log = log_path(
+        f"watch_{sym['name']}_{args.schema.replace('-', '')}_"
+        f"{datetime.now(timezone.utc):%Y%m%d_%H%M%S}.log")
+    _log_fh = open(session_log, "a", encoding="utf-8")
+    sys.stdout = _Tee(sys.stdout, _log_fh)
+    sys.stderr = _Tee(sys.stderr, _log_fh)
+    print(f"session log: {session_log}")
+
     tape = Tape(args.schema, min_size=args.min_size, quiet=args.quiet,
                 book_secs=args.book_secs, big_mult=args.big_mult,
                 big_min=args.big_min, sweep_ms=args.sweep_ms)

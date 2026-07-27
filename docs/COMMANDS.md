@@ -346,7 +346,10 @@ plus a `[1m]` summary each minute (OHLC, volume, minute delta, CVD, trade
 count, big-trade counters `big 3B/1S +180` — and add/cancel/modify counters
 on mbo), book snapshots on the mbp schemas (mbp-10 shows total bid vs ask
 depth and the imbalance %), and a session total on Ctrl-C including big-buy
-vs big-sell volume. Auto-reconnects if the stream drops. Schema
+vs big-sell volume. Everything shown is also written to
+`logs\watch_<SYMBOL>_<schema>_<start time>.log` (one file per run, printed
+as the first line), so tape history and BIG alerts survive after the
+terminal closes. Auto-reconnects if the stream drops. Schema
 availability depends on your Databento license; note that on `mbo`, only
 trade events feed the CVD (a resting ask-side add is a quote, not a sale).
 
