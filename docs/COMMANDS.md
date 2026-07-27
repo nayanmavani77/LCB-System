@@ -306,7 +306,41 @@ Fri ~2:30 AM → Sun ~3:30 AM IST. Disable Windows sleep.
 
 ---
 
-## 8. Where things live
+## 8. Data watcher — `run/watch.py`
+
+Live read-only stream viewer for any symbol + any Databento schema, with a
+session-anchored **cumulative delta (CVD)** — buy volume minus sell volume,
+reset at the CME 17:00-ET boundary. No orders, no strategy: safe to run in
+its own terminal alongside live trading.
+
+| Option | Meaning | Default |
+|---|---|---|
+| `--symbol GC` | symbol from `core/symbols.py` | GC |
+| `--schema` | `tbbo` (trade + best bid/ask) / `trades` / `mbp-1` (top of book) / `mbp-10` (10-level depth) / `mbo` (every order event) | tbbo |
+| `--min-size 10` | print only trades of at least this many contracts (CVD still counts everything) | 0 |
+| `--quiet` | no tape — only the per-minute summary lines | off |
+| `--book-secs 1.0` | min seconds between book snapshots (mbp schemas) | 1.0 |
+
+```
+python run/watch.py                                   # GC TBBO tape + CVD
+python run/watch.py --symbol SI --schema trades
+python run/watch.py --schema mbp-10                   # depth + imbalance watch
+python run/watch.py --schema mbo --quiet              # add/cancel counters per minute
+python run/watch.py --min-size 10                     # big prints only
+```
+
+What you see: every trade (`12:34:56.789  BUY  12 @ 4052.30  CVD +1,234
+[4052.2/4052.4]`), a `[1m]` summary each minute (OHLC, volume, minute
+delta, CVD, trade count — plus add/cancel/modify counters on mbo), book
+snapshots on the mbp schemas (mbp-10 shows total bid vs ask depth and the
+imbalance %), and a session total on Ctrl-C. Auto-reconnects if the stream
+drops. Schema availability depends on your Databento license; note that on
+`mbo`, only trade events feed the CVD (a resting ask-side add is a quote,
+not a sale).
+
+---
+
+## 9. Where things live
 
 | Path | What it is |
 |---|---|
@@ -317,6 +351,7 @@ Fri ~2:30 AM → Sun ~3:30 AM IST. Disable Windows sleep.
 | `engines\__init__.py` | engine registry - add new strategies here |
 | `core\` | shared machinery: brokers, data/replay, reports, CLI flags, symbols, paths |
 | `run\backtest.py` / `run\live.py` | the two runners (same engines, same flags) |
+| `run\watch.py` | live data watcher: any schema, tape + cumulative delta (read-only) |
 | `scripts\` | data prep, data download, MT5 connection test |
 | `logs\` | ALL generated output: trade CSVs, MT5 signal logs, state files (gitignored) |
 | `config.py` | your secrets (gitignored) |
@@ -326,7 +361,7 @@ Fri ~2:30 AM → Sun ~3:30 AM IST. Disable Windows sleep.
 
 ---
 
-## 9. A warning that belongs in every command file
+## 10. A warning that belongs in every command file
 
 When you sweep `--rr` / `--sl-*` / `--set` values, tune on one period
 (e.g. 2023–2024) and confirm on a period the tuning never saw (2025–2026).
