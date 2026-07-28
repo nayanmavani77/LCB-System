@@ -80,7 +80,7 @@ python run/backtest.py --start YYYY-MM-DD --end YYYY-MM-DD
 |---|---|---|
 | `--start` / `--end` | date window (clamped to available data) | all data |
 | `--symbols GC,SI` (alias `--symbol`) | one symbol → full report; comma list → per-symbol reports + combined portfolio (joint $ P&L, joint max DD) | GC |
-| `--engine` | `lrev` (validated level-break) / `ldef` (defend, tested negative) / `gtrend` (daily trend-pullback) / `gtrend-lowdd` / `delta` (1-min volume delta, UNTESTED) | lrev |
+| `--engine` | `lrev` (validated level-break) / `ldef` (defend, tested negative) / `gtrend` (daily trend-pullback) / `gtrend-lowdd` / `delta` (1-min volume delta, UNTESTED) / `sweepfade` (fade BIG sweeps, small-sample validation) | lrev |
 | `--config` | lrev gate presets: `v2-flow` (all gates) / `v2-ea` (no flow gate) / `v1` (no gates) | v2-flow |
 | `--csv FILE.csv` | save every trade to a CSV (written into `logs\`; one file per symbol when multi-symbol) | off |
 | `--cost 0.4` | commission+slippage per round turn in points (spread is separately embedded in fills) | per-symbol value from `core/symbols.py` |
@@ -217,6 +217,43 @@ python run/backtest.py --engine delta --set delta_threshold=0.75 --set min_volum
 python run/backtest.py --engine delta --set require_color=true
 python run/backtest.py --engine delta --set vwap_filter=with --set delta_threshold=0.7 --rr 2.0
 ```
+
+### 5e. `sweepfade` — fade BIG sweeps (spec: `docs\SWEEPFADE_SPEC.md`)
+
+Trades AGAINST qualifying big sweeps (the same events the watcher flags
+with `>>> BIG`): market entry the moment a sweep cluster closes,
+volatility-scaled stop, 2.5R target, 600s time stop (a PRIMARY exit — 43%
+of trades), strictly one position at a time. Spec's 30h GC sample:
++0.355 R/trade, PF 1.81, t=+2.52 — statistically significant but a SMALL
+SAMPLE (98 trades, 2 volatile sessions). The spec §12 lists overlays that
+were tested and REJECTED (breakeven/trailing stops, partial exits, entry
+delays, cooldowns) — do not add them.
+
+| Key | Meaning | Default |
+|---|---|---|
+| `big_mult` / `big_min` / `sweep_ms` | BIG detection — keep identical to the watcher's | 10 / 20 / 50 |
+| `mag_x_avg` / `mag_size` | magnitude condition: x_avg ≥ 18 OR size ≥ 35 | 18 / 35 |
+| `min_prints` | multilevel condition: sweep must span ≥ N fills | 6 |
+| `clean_window_s` | clean condition: no opposite-side BIG in this window | 300 |
+| `min_qscore` | conditions required (spec: 2; do NOT raise to 3) | 2 |
+| `tick` | instrument tick size (re-derive ALL thresholds if changed) | 0.10 |
+| `stop_range_mult` | stop = this × trailing-300s trade-price range... | 0.5 |
+| `stop_min_ticks` / `stop_max_ticks` | ...clamped to this band (ticks) | 8 / 45 |
+| `target_r` | target = this × stop distance | 2.5 |
+| `max_hold_s` | time stop (seconds) | 600 |
+| `max_concurrent` | simultaneous positions (spec: strictly 1) | 1 |
+| `max_spread` / `qty` | entry spread gate / backtest size | per-symbol / 1 |
+
+```
+python run/backtest.py --engine sweepfade --start 2026-01-01 --cost 0.05
+python run/live.py --engine sweepfade --broker mt5 --mt5-symbol XAUUSD+ --lots 0.01
+```
+
+Cost note: PaperBroker charges the quoted spread inside its fills already,
+so `--cost 0.05` (≈$5 commission) approximates the spec's cost model; the
+default 0.4 pts is much more conservative at this tick scale. Break-even
+is ~5–6 ticks of entry slippage — costs are this strategy's single point
+of failure.
 
 ---
 
@@ -363,6 +400,7 @@ trade events feed the CVD (a resting ask-side add is a quote, not a sale).
 | `engines\ldef.py` | experimental defend engine (tested negative - do not trade) |
 | `engines\gtrend.py` | G-Trend: daily trend-pullback engine (spec: `docs\GTREND_SPEC.md`; GC only — SI tested negative) |
 | `engines\delta.py` | Delta-1m: 1-min volume-delta breakout (UNTESTED — backtest before any live use; params via `--set`) |
+| `engines\sweepfade.py` | Sweep-Fade: fade BIG sweeps (spec: `docs\SWEEPFADE_SPEC.md`; small-sample — backtest across regimes first) |
 | `engines\__init__.py` | engine registry - add new strategies here |
 | `core\` | shared machinery: brokers, data/replay, reports, CLI flags, symbols, paths |
 | `run\backtest.py` / `run\live.py` | the two runners (same engines, same flags) |
