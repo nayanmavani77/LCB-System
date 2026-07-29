@@ -269,8 +269,119 @@ def t_cli_set_flag():
         pass
 
 
+# --------------------------------------------------------------------- retf
+def _retf_run(cfg, ticks):
+    from engines.retf import RETFStrategy
+    b = PaperBroker(trade_log_path=None, cost_pts=0.0, log=lambda *a: None)
+    fills = []
+    orig = b.market_order
+    def spy(ts, d, q, sl, tp, tag, ref_px=None):
+        fills.append(dict(ts=ts, d=d, sl=sl, tp=tp, ref=ref_px, tag=tag))
+        orig(ts, d, q, sl, tp, tag, ref_px=ref_px)
+    b.market_order = spy
+    s = RETFStrategy(b, config=cfg, log=lambda *a: None)
+    for ts, px in ticks:
+        b.on_tick(ts, px - 0.1, px + 0.1)
+        s.on_tick(ts, px, 1.0, "N", px - 0.1, px + 0.1)
+    return b, s, fills
+
+
+def _retf_ticks(closes, tf_min=15, t0=None, per_bar=4):
+    """One bar per close value: open/high/low/close ~= the value."""
+    t0 = t0 or pd.Timestamp("2026-02-02", tz="UTC").value
+    bar_ns = tf_min * 60 * NS
+    out = []
+    for i, c in enumerate(closes):
+        for j in range(per_bar):
+            out.append((t0 + i * bar_ns + j * (bar_ns // per_bar), float(c)))
+    return out
+
+
+def t_retf_ema_and_filter():
+    from engines.retf import RETFStrategy
+    # EMA must match pandas ewm(adjust=False)
+    closes = list(2000 + np.cumsum(np.random.default_rng(1).normal(0, 2, 200)))
+    b = PaperBroker(trade_log_path=None, log=lambda *a: None)
+    s = RETFStrategy(b, config={"ema_period": 50}, log=lambda *a: None)
+    for c in closes:
+        s._ema_update(c)
+    ref = pd.Series(closes).ewm(span=50, adjust=False).mean().iloc[-1]
+    assert abs(s._ema - ref) < 1e-9, (s._ema, ref)
+    # rising tape -> longs only; falling tape -> shorts only
+    up = list(np.linspace(2000, 2200, 80))
+    _, _, f = _retf_run({"ema_period": 10, "sl_points": 5, "rr": 3,
+                         "entry_prob": 1.0}, _retf_ticks(up))
+    assert f and all(e["d"] == 1 for e in f)
+    e = f[0]
+    assert abs((e["ref"] - e["sl"]) - 5.0) < 1e-9          # SL 5 pts
+    assert abs((e["tp"] - e["ref"]) - 15.0) < 1e-9         # TP = 3R
+    down = list(np.linspace(2200, 2000, 80))
+    _, _, f2 = _retf_run({"ema_period": 10, "entry_prob": 1.0},
+                         _retf_ticks(down))
+    assert f2 and all(e["d"] == -1 for e in f2)
+
+
+def t_retf_determinism_and_prob():
+    up = list(np.linspace(2000, 2400, 300))
+    cfg = {"ema_period": 10, "entry_prob": 0.3, "seed": 42,
+           "sl_points": 5, "rr": 3}
+    _, _, a = _retf_run(dict(cfg), _retf_ticks(up))
+    _, _, b = _retf_run(dict(cfg), _retf_ticks(up))
+    assert [x["tag"] for x in a] == [x["tag"] for x in b]   # same seed = same
+    _, _, c = _retf_run(dict(cfg, seed=7), _retf_ticks(up))
+    assert [x["tag"] for x in a] != [x["tag"] for x in c]   # diff seed = diff
+    _, _, full = _retf_run(dict(cfg, entry_prob=1.0), _retf_ticks(up))
+    assert len(a) < len(full)                               # prob thins entries
+
+
+def t_retf_breakeven_time_exit_session():
+    from engines.retf import RETFStrategy
+    t0 = pd.Timestamp("2026-02-02", tz="UTC").value
+    bar = 15 * 60 * NS
+    # warm 12 rising bars -> long entry at bar 12 close (~2059)
+    ticks = _retf_ticks(list(np.linspace(2000, 2060, 12)), t0=t0)
+    b, s, f = _retf_run({"ema_period": 10, "entry_prob": 1.0, "sl_points": 5,
+                         "rr": 100, "use_breakeven": True}, ticks)
+    assert len(f) == 1 and f[0]["d"] == 1
+    ref = f[0]["ref"]
+    # +1R favorable -> SL moves to the broker's ACTUAL fill
+    pos = b.positions[0]
+    ts2 = t0 + 12 * bar + NS
+    b.on_tick(ts2, ref + 5.0 - 0.1, ref + 5.0 + 0.1)
+    s.on_tick(ts2, ref + 5.0, 1.0, "N", ref + 5.0 - 0.1, ref + 5.0 + 0.1)
+    assert abs(pos.sl - pos.entry) < 1e-9, (pos.sl, pos.entry)
+    # time exit: flat tape at the EMA keeps the position open until max_bars
+    b2, s2, f2 = _retf_run(
+        {"ema_period": 10, "entry_prob": 1.0, "sl_points": 50, "rr": 100,
+         "use_time_exit": True, "max_bars": 3},
+        _retf_ticks(list(np.linspace(2000, 2060, 12)) + [2060.5] * 5, t0=t0))
+    assert len(f2) >= 1
+    assert any(r["reason"] == "time" for r in b2.closed)
+    first_close = b2.closed[0]
+    held_ns = first_close["ts_close"] - first_close["ts_open"]
+    assert held_ns >= 3 * 15 * 60 * NS * 0.9      # ~3 bars held
+    # session gate: a window that excludes the tape's hours -> zero trades
+    _, _, f3 = _retf_run({"ema_period": 10, "entry_prob": 1.0,
+                          "session_start": "14:00", "session_end": "15:00"},
+                         _retf_ticks(list(np.linspace(2000, 2060, 20)), t0=t0))
+    assert f3 == []                       # ticks are 00:00-05:00 UTC
+
+
+def t_retf_reentry_and_one_position():
+    # SL 0.5 pt -> first long stops out quickly; engine must wait
+    # reentry_bars before the next entry, and never hold two at once
+    closes = list(np.linspace(2000, 2030, 15)) + [2028, 2032, 2036, 2040]
+    b, s, f = _retf_run({"ema_period": 5, "entry_prob": 1.0,
+                         "sl_points": 0.5, "rr": 100, "reentry_bars": 2},
+                        _retf_ticks(closes))
+    entry_bars = [int(x["tag"].split("|")[2]) for x in f]
+    for a, nxt in zip(entry_bars, entry_bars[1:]):
+        assert nxt - a >= 2, entry_bars   # closed + waited >= 2 bars
+    assert max(len(b.positions), 1) == 1
+
+
 def t_registry():
-    assert sorted(ENGINES) == ["gtrend", "gtrend-lowdd", "lrev"]
+    assert sorted(ENGINES) == ["gtrend", "gtrend-lowdd", "lrev", "retf"]
     for cls in ENGINES.values():
         assert hasattr(cls, "on_tick") or True   # classes, instantiable:
         b = PaperBroker(trade_log_path=None, log=lambda *a: None)

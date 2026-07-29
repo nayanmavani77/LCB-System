@@ -39,6 +39,11 @@ class Broker(ABC):
         time stop). Returns True if a position was closed. Default: no-op."""
         return False
 
+    def move_sl_to_breakeven(self, ts: int, tag: str) -> bool:
+        """Move the stop of the open position with this tag to its ACTUAL
+        entry price (breakeven). Returns True on success. Default: no-op."""
+        return False
+
 
 
 @dataclass
@@ -112,6 +117,14 @@ class PaperBroker(Broker):
             if pos.tag == tag:
                 px = self.bid if pos.direction > 0 else self.ask
                 self._close(pos, ts, px, "time")
+                return True
+        return False
+
+    def move_sl_to_breakeven(self, ts, tag: str) -> bool:
+        for pos in self.positions:
+            if pos.tag == tag:
+                pos.sl = pos.entry          # actual fill, not the engine ref
+                self.log(f"BREAKEVEN SL -> {pos.sl:.2f} [{tag}]")
                 return True
         return False
 

@@ -284,5 +284,31 @@ class MT5Broker(Broker):
             return ok
         return False
 
+    def move_sl_to_breakeven(self, ts, tag: str) -> bool:
+        """Move the position's SL to its actual open price (server-side)."""
+        mt5 = self.mt5
+        want_ticket = self._tickets.get(tag)
+        for p in self._my_positions():
+            if p.ticket != want_ticket and p.comment != tag[:31]:
+                continue
+            req = {"action": mt5.TRADE_ACTION_SLTP,
+                   "symbol": self.symbol,
+                   "position": p.ticket,
+                   "sl": p.price_open,
+                   "tp": p.tp,
+                   "magic": MAGIC}
+            result = mt5.order_send(req)
+            ok = (result is not None
+                  and result.retcode == mt5.TRADE_RETCODE_DONE)
+            if ok:
+                self.log(f"MT5 BREAKEVEN SL -> {p.price_open:.2f} "
+                         f"(position {p.ticket}) [{tag}]")
+            else:
+                rc = result.retcode if result is not None else "send_error"
+                self.log(f"MT5 breakeven modify FAILED retcode={rc} [{tag}] "
+                         f"- original SL kept (position stays protected)")
+            return ok
+        return False
+
     def shutdown(self):
         self.mt5.shutdown()

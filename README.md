@@ -17,6 +17,7 @@ implementation, so backtest behaviour == live behaviour by construction.
     engines/         STRATEGIES - one file per engine, add new ones here
       lrev.py          L-Rev: level-BREAK engine (validated on GC, OOS on SI)
       gtrend.py        G-Trend: daily trend-pullback engine (GC only)
+      retf.py          RETF: random entry + EMA trend filter (benchmark)
     core/            shared machinery (engine-agnostic)
       broker.py        Broker interface + PaperBroker simulator
       mt5_broker.py    MT5 execution adapter (futures signals -> CFD orders)

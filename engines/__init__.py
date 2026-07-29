@@ -22,9 +22,11 @@ describe(cfg) / status() methods customise the config line and heartbeat.
 """
 from .gtrend import GTrendLowDD, GTrendStrategy
 from .lrev import DEFAULT_CONFIG, Bar, LRevStrategy, TF_SECONDS
+from .retf import RETFStrategy
 
 ENGINES = {
     "lrev": LRevStrategy,       # level-BREAK engine (validated on GC, OOS on SI)
     "gtrend": GTrendStrategy,   # daily trend-pullback PRIMARY (spec: docs/GTREND_SPEC.md)
     "gtrend-lowdd": GTrendLowDD,  # same rules, LOW-DD sizing (3 x 1/3, z>=0.6)
+    "retf": RETFStrategy,       # random entry + EMA trend filter (benchmark engine)
 }

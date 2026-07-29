@@ -81,7 +81,7 @@ python run/backtest.py --start YYYY-MM-DD --end YYYY-MM-DD
 |---|---|---|
 | `--start` / `--end` | date window (clamped to available data) | all data |
 | `--symbols GC,SI` (alias `--symbol`) | one symbol → full report; comma list → per-symbol reports + combined portfolio (joint $ P&L, joint max DD) | GC |
-| `--engine` | `lrev` (validated level-break) / `gtrend` (daily trend-pullback) / `gtrend-lowdd` (same rules, lower drawdown) | lrev |
+| `--engine` | `lrev` (validated level-break) / `gtrend` (daily trend-pullback) / `gtrend-lowdd` (same rules, lower drawdown) / `retf` (random entry + EMA trend filter — benchmark) | lrev |
 | `--config` | lrev gate presets: `v2-flow` (all gates) / `v2-ea` (no flow gate) / `v1` (no gates) | v2-flow |
 | `--csv FILE.csv` | save every trade to a CSV (written into `logs\`; one file per symbol when multi-symbol) | off |
 | `--cost 0.4` | commission+slippage per round turn in points (spread is separately embedded in fills) | per-symbol value from `core/symbols.py` |
@@ -186,6 +186,37 @@ Ignores the lrev flags (`--sl-*`, `--tf`, `--flow-*`, `--order-age`).
 python run/backtest.py --engine gtrend --set allow_short=false   # long-only research
 ```
 
+### 5c. `retf` — Random Entry with Trend Filter (benchmark engine)
+
+Entries are RANDOM in timing; only the direction is constrained by an EMA
+trend filter. One position at a time, continuous trading. Use it as the
+honesty benchmark: a real strategy should beat `retf` with the same filter
+and costs — if it doesn't, its entries add nothing. Deterministic per
+seed: run several `--set seed=N` values and judge the DISTRIBUTION.
+
+| Key | Meaning | Default |
+|---|---|---|
+| `tf_min` | trading timeframe in minutes (15/60/240 warm up from cache) | 15 |
+| `sl_points` | stop distance in points | 5 |
+| `rr` | TP = sl_points × RR *(flag: `--rr`)* | 3 |
+| `ema_period` | trend filter length (bars): close above → longs only, below → shorts only | 50 |
+| `require_slope` | stricter: EMA must also slope with the trade | false |
+| `slope_lag` | bars back for the slope comparison | 10 |
+| `entry_prob` | chance to enter per eligible bar (lower = sparser trading) | 1.0 |
+| `use_breakeven` | move SL to the actual fill at +1R | false |
+| `use_time_exit` / `max_bars` | flatten after N bars if still open | false / 50 |
+| `session_start` / `session_end` | trade only inside this UTC window, "HH:MM" (supports overnight) | off |
+| `reentry_bars` | bars to wait after a close before re-entry | 1 |
+| `seed` | RNG seed — same seed + data = identical backtest | 42 |
+| `max_spread` / `max_concurrent` / `qty` | entry spread gate / positions / backtest size | per-symbol / 1 / 1 |
+
+```
+python run/backtest.py --engine retf --start 2024-01-01
+python run/backtest.py --engine retf --set sl_points=8 --rr 2 --set seed=7
+python run/backtest.py --engine retf --set use_breakeven=true --set entry_prob=0.25
+python run/backtest.py --engine retf --set session_start=07:00 --set session_end=16:00
+```
+
 ---
 
 ## 6. MT5 checks (before live trading) — `scripts/test_mt5.py`
@@ -214,7 +245,7 @@ Expert Advisors → "Allow algorithmic trading" enabled.
 |---|---|---|
 | `--broker` | `paper` (simulated fills, always safe) or `mt5` (real orders) | paper |
 | `--symbols GC` (alias `--symbol`) | what to trade; comma list runs MULTI-SYMBOL/MULTI-ENGINE in one terminal. Per-entry format: `NAME[:MT5SYMBOL[:LOTS[:ENGINE]]]` | GC |
-| `--engine` | `lrev` / `gtrend` / `gtrend-lowdd` | lrev |
+| `--engine` | `lrev` / `gtrend` / `gtrend-lowdd` / `retf` | lrev |
 | `--mt5-symbol XAUUSD+` | MT5 symbol override | registry (GC→XAUUSD) |
 | `--lots 0.01` | lots per entry (per-symbol override via `--symbols`) | 0.01 |
 | `--no-flow-gate` | run the v2-ea configuration live (lrev) | off |
@@ -329,6 +360,7 @@ trade events feed the CVD (a resting ask-side add is a quote, not a sale).
 |---|---|
 | `engines\lrev.py` | THE validated strategy (single source of truth, backtest + live) |
 | `engines\gtrend.py` | G-Trend: daily trend-pullback engine (spec: `docs\GTREND_SPEC.md`; GC only — SI tested negative) |
+| `engines\retf.py` | RETF: random entry + EMA trend filter (benchmark engine; deterministic per seed) |
 | `engines\__init__.py` | engine registry - add new strategies here |
 | `core\` | shared machinery: brokers, data/replay, reports, CLI flags, symbols, paths |
 | `run\backtest.py` / `run\live.py` | the two runners (same engines, same flags) |
