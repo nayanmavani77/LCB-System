@@ -41,13 +41,18 @@ from __future__ import annotations
 import json
 import random
 
-from .lrev import BarBuilder
+from .lrev import BarBuilder, median
 
 RETF_CONFIG = {
     "tf_min": 15,             # trading timeframe in minutes (15/60/240 can
                               # warm up from cached bars; others build live)
-    "sl_points": 5.0,         # stop distance in price points
-    "rr": 3.0,                # TP = sl_points x rr   (flag: --rr)
+    "sl_mode": "points",      # "points" (fixed) | "atr" (mean TR, responsive)
+                              # | "mtr" (median TR, outlier-robust)
+    "sl_points": 5.0,         # stop distance in points     (sl_mode=points)
+    "sl_mult": 1.5,           # stop = this x ATR/MTR       (sl_mode=atr/mtr)
+    "vol_window": 20,         # closed bars for the ATR/MTR calculation
+    "sl_min_points": 0.5,     # floor for computed stops    (sl_mode=atr/mtr)
+    "rr": 3.0,                # TP = stop distance x rr   (flag: --rr)
     "ema_period": 50,         # trend filter length (bars)
     "require_slope": False,   # stricter: EMA must slope with the trade
     "slope_lag": 10,          # bars back for the slope comparison
@@ -90,6 +95,9 @@ class RETFStrategy:
         cfg = dict(type(self).CONFIG)
         if config:
             cfg.update(config)    # runner cfg carries L-Rev keys; ignored
+        if str(cfg["sl_mode"]).lower() not in ("points", "atr", "mtr"):
+            raise SystemExit(f"retf: sl_mode must be points/atr/mtr, "
+                             f"got '{cfg['sl_mode']}'")
         self.cfg = cfg
         self.broker = broker
         self.log = log
@@ -110,13 +118,16 @@ class RETFStrategy:
 
     # ---------------------------------------------------------------- seeding
     def seed_bars(self, tf: str, bars):
-        """Warm the EMA from cached bars of the matching timeframe."""
+        """Warm the EMA and the bar history (for ATR/MTR stops) from cached
+        bars of the matching timeframe."""
         if _TF_NAME.get(int(self.cfg["tf_min"])) != tf:
             return
+        bars = list(bars)
+        self._bb.seed(bars)                 # TR history for atr/mtr stops
         for b in bars:
             self._ema_update(b.c)
         if bars:
-            self.log(f"[RETF] EMA warmed from {len(bars)} {tf} bars")
+            self.log(f"[RETF] warmed from {len(bars)} {tf} bars")
 
     def _ema_update(self, close: float):
         self._ema = (close if self._ema is None
@@ -142,7 +153,7 @@ class RETFStrategy:
             else:
                 if (cfg["use_breakeven"] and not t["be"]):
                     fav = (price - t["ref"]) * t["dir"]
-                    if fav >= cfg["sl_points"]:            # +1R in favor
+                    if fav >= t["stop"]:                   # +1R in favor
                         if self.broker.move_sl_to_breakeven(ts, t["tag"]):
                             t["be"] = True
 
@@ -208,12 +219,15 @@ class RETFStrategy:
                      f"{cfg['max_spread']}")
             return
 
+        stop = self._stop_distance()
+        if stop is None:
+            return                          # ATR/MTR not warm - fail closed
         # anchor SL/TP on the ENTRY-time price (this tick), not the closed
         # bar's close - if price gapped over the bar boundary the geometry
-        # must follow the fill (spec: SL = entry +- SL_points)
+        # must follow the fill (spec: SL = entry +- stop)
         ref = entry_px
-        sl = ref - direction * cfg["sl_points"]
-        tp = ref + direction * cfg["sl_points"] * cfg["rr"]
+        sl = ref - direction * stop
+        tp = ref + direction * stop * cfg["rr"]
         self._n_trades += 1
         tag = (f"{cfg['tag_prefix']}|{'L' if direction > 0 else 'S'}|"
                f"{self._bar_count}")
@@ -224,7 +238,25 @@ class RETFStrategy:
         self.broker.market_order(self.now, direction, cfg["qty"],
                                  sl, tp, tag, ref_px=ref)
         self._open = dict(tag=tag, entry_bar=self._bar_count,
-                          dir=direction, ref=ref, be=False)
+                          dir=direction, ref=ref, stop=stop, be=False)
+
+    def _stop_distance(self) -> float | None:
+        """Stop distance per sl_mode: fixed points, or sl_mult x ATR/MTR of
+        the last vol_window closed bars (mean = responsive to regime shifts,
+        median = robust to single outlier bars). None while not warm."""
+        cfg = self.cfg
+        mode = str(cfg["sl_mode"]).lower()
+        if mode == "points":
+            return float(cfg["sl_points"])
+        n = int(cfg["vol_window"])
+        bars = list(self._bb.bars)
+        if len(bars) < n + 1:
+            return None
+        window = bars[-(n + 1):]            # n TRs need n+1 bars
+        trs = [max(c.h - c.l, abs(c.h - p.c), abs(c.l - p.c))
+               for p, c in zip(window[:-1], window[1:])]
+        base = (sum(trs) / len(trs)) if mode == "atr" else median(trs)
+        return max(base * float(cfg["sl_mult"]), float(cfg["sl_min_points"]))
 
     # ---------------------------------------------------------------- misc
     def status(self) -> str:
@@ -246,10 +278,14 @@ class RETFStrategy:
         if cfg["session_start"] and cfg["session_end"]:
             opts.append(f"session {cfg['session_start']}-{cfg['session_end']} UTC")
         extra = (" | " + ", ".join(opts)) if opts else ""
+        mode = str(cfg["sl_mode"]).lower()
+        sl_txt = (f"SL {cfg['sl_points']} pts" if mode == "points"
+                  else f"SL {cfg['sl_mult']}x{mode.upper()}"
+                       f"({cfg['vol_window']})")
         return (f"{cfg.get('engine_name', 'RETF')} | RANDOM entries "
                 f"(p={cfg['entry_prob']}, seed {cfg['seed']}) with "
                 f"EMA{cfg['ema_period']} trend filter on M{cfg['tf_min']} | "
-                f"SL {cfg['sl_points']} pts, TP {cfg['rr']}R{extra}")
+                f"{sl_txt}, TP {cfg['rr']}R{extra}")
 
     def save_state(self, path):
         with open(path, "w") as f:

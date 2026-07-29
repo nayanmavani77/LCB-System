@@ -197,8 +197,12 @@ seed: run several `--set seed=N` values and judge the DISTRIBUTION.
 | Key | Meaning | Default |
 |---|---|---|
 | `tf_min` | trading timeframe in minutes (15/60/240 warm up from cache) | 15 |
-| `sl_points` | stop distance in points | 5 |
-| `rr` | TP = sl_points × RR *(flag: `--rr`)* | 3 |
+| `sl_mode` | `points` (fixed) / `atr` (mean true range — responsive to regime shifts) / `mtr` (median true range — robust to outlier bars) | points |
+| `sl_points` | stop distance in points (sl_mode=points) | 5 |
+| `sl_mult` | stop = this × ATR/MTR (sl_mode=atr/mtr) | 1.5 |
+| `vol_window` | closed bars for the ATR/MTR calculation | 20 |
+| `sl_min_points` | floor for computed stops (sl_mode=atr/mtr) | 0.5 |
+| `rr` | TP = stop distance × RR *(flag: `--rr`)* | 3 |
 | `ema_period` | trend filter length (bars): close above → longs only, below → shorts only | 50 |
 | `require_slope` | stricter: EMA must also slope with the trade | false |
 | `slope_lag` | bars back for the slope comparison | 10 |
@@ -215,7 +219,15 @@ python run/backtest.py --engine retf --start 2024-01-01
 python run/backtest.py --engine retf --set sl_points=8 --rr 2 --set seed=7
 python run/backtest.py --engine retf --set use_breakeven=true --set entry_prob=0.25
 python run/backtest.py --engine retf --set session_start=07:00 --set session_end=16:00
+python run/backtest.py --engine retf --set sl_mode=atr --set sl_mult=1.5 --rr 3
+python run/backtest.py --engine retf --set sl_mode=mtr --set sl_mult=1.5 --set vol_window=20
 ```
+
+Stop-mode note: `points` keeps risk constant in price terms (so risk per
+unit of TIME breathes with volatility — quiet years resolve slowly, wild
+years churn); `atr`/`mtr` scale the stop to current volatility, keeping
+trade duration and R-geometry comparable across regimes. Same seed +
+different sl_mode = a clean exit-geometry experiment on identical entries.
 
 ---
 

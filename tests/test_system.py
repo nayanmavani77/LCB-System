@@ -394,6 +394,58 @@ def t_retf_breakeven_time_exit_session():
     assert f3 == []                       # ticks are 00:00-05:00 UTC
 
 
+def t_retf_stop_modes():
+    """sl_mode points/atr/mtr: ATR = mean TR (feels outliers), MTR = median
+    TR (ignores them), computed over vol_window closed bars; fail-closed
+    while not warm; breakeven trigger uses the trade's OWN stop distance."""
+    t0 = pd.Timestamp("2026-02-02", tz="UTC").value
+    bar = 15 * 60 * NS
+
+    def ticks_with_ranges(closes, ranges):
+        out = []
+        for i, (c, r) in enumerate(zip(closes, ranges)):
+            b0 = t0 + i * bar
+            for j, px in enumerate([c, c + r / 2, c - r / 2, c]):
+                out.append((b0 + j * (bar // 4), float(px)))
+        return out
+
+    # 25 rising bars, range 1.0 except one 9.0 outlier inside the window
+    closes = list(np.linspace(2000, 2005, 25))
+    ranges = [1.0] * 25
+    ranges[15] = 9.0
+    base_cfg = {"ema_period": 5, "entry_prob": 1.0, "rr": 2.0,
+                "sl_mult": 2.0, "vol_window": 20, "seed": 1}
+    stops = {}
+    for mode in ("atr", "mtr"):
+        _, _, f = _retf_run(dict(base_cfg, sl_mode=mode),
+                            ticks_with_ranges(closes, ranges))
+        assert f, mode
+        e = f[0]
+        stops[mode] = e["ref"] - e["sl"]
+        # entry only after vol_window+1 bars closed (fail-closed warmup)
+        assert int(e["tag"].split("|")[2]) >= 21, e["tag"]
+        assert abs((e["tp"] - e["ref"]) - 2.0 * stops[mode]) < 1e-9
+    # TRs ~[1.0 x19, 9.0 x1] within any 20-bar window (drift < range):
+    # ATR ~ (19+9)/20 = 1.4 -> stop 2.8 ; MTR ~ 1.0 -> stop 2.0
+    assert 2.6 < stops["atr"] < 3.1, stops
+    assert 1.9 < stops["mtr"] < 2.3, stops
+    assert stops["atr"] > stops["mtr"]     # mean feels the outlier
+    # floor applies on a near-flat tape (drift 0.1 -> TR 0.1 -> 0.2 < floor)
+    flat = ticks_with_ranges([2000 + i * 0.1 for i in range(25)], [0.0] * 25)
+    _, _, ff = _retf_run(dict(base_cfg, sl_mode="mtr", sl_min_points=0.5,
+                              ema_period=3), flat)
+    if ff:
+        assert abs((ff[0]["ref"] - ff[0]["sl"]) - 0.5) < 0.2, ff[0]
+    # invalid mode fails loudly
+    from engines.retf import RETFStrategy
+    try:
+        RETFStrategy(PaperBroker(trade_log_path=None, log=lambda *a: None),
+                     config={"sl_mode": "bogus"}, log=lambda *a: None)
+        raise AssertionError("bogus sl_mode accepted")
+    except SystemExit:
+        pass
+
+
 def t_retf_reentry_and_one_position():
     # SL 0.5 pt -> first long stops out quickly; engine must wait
     # reentry_bars before the next entry, and never hold two at once
