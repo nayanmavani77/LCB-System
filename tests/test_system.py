@@ -268,6 +268,29 @@ def t_report_qty_weighting_and_tf_block():
     assert "by timeframe" in buf2.getvalue()
 
 
+def t_report_streaks():
+    """Report shows the longest winning and losing streaks (W W L L L W
+    -> 2 consecutive wins, 3 consecutive losses)."""
+    from core.report import print_report
+    b = PaperBroker(trade_log_path=None, cost_pts=0.0, log=lambda *a: None)
+    for i, p in enumerate([+1.0, +2.0, -1.0, -1.0, -1.0, +1.0]):
+        b.closed.append({"ts_open": (i + 1) * 10**9,
+                         "ts_close": (i + 1) * 10**9 + 1,
+                         "entry": 100.0, "sl": 99.0, "dir": 1,
+                         "reason": "tp" if p > 0 else "sl",
+                         "pnl_pts": p, "pnl_usd": p * 100.0})
+    buf = io.StringIO()
+    old = sys.stdout
+    sys.stdout = buf
+    try:
+        print_report(b, point_value=100.0)
+    finally:
+        sys.stdout = old
+    out = buf.getvalue()
+    assert "max consec wins : 2 trades" in out and "+3.0 pts" in out
+    assert "max consec loss : 3 trades" in out and "-3.0 pts" in out
+
+
 # ----------------------------------------------------------------------- cli
 def t_cli_set_flag():
     import argparse

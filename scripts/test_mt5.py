@@ -1,6 +1,7 @@
 """MT5 connection test - run this BEFORE live trading to verify everything.
 
     python scripts/test_mt5.py --symbol XAUUSD
+    python scripts/test_mt5.py --symbol XAUUSD --max-spread 0.9
     python scripts/test_mt5.py --symbol XAUUSD --place-test-order
     python scripts/test_mt5.py --symbol XAUUSD --place-test-order --allow-real
 
@@ -26,6 +27,10 @@ def main():
                     help="permit --place-test-order on a REAL account "
                          "(asks you to type the account number to confirm; "
                          "costs ~1 spread + commission on the test lot)")
+    ap.add_argument("--max-spread", type=float, default=None,
+                    help="spread filter in price units (e.g. 0.9 to mirror "
+                         "the GC live gate): the check FAILS and the test "
+                         "order is NOT sent while live spread exceeds this")
     args = ap.parse_args()
 
     try:
@@ -52,10 +57,20 @@ def main():
                          f"Gold-like symbols on this broker: {syms}")
     mt5.symbol_select(args.symbol, True)
     tick = mt5.symbol_info_tick(args.symbol)
+    spread = tick.ask - tick.bid
     print(f"OK  {args.symbol}: bid {tick.bid} ask {tick.ask} "
-          f"spread {(tick.ask - tick.bid):.2f}")
+          f"spread {spread:.2f}")
+    if args.max_spread is not None:
+        if spread <= args.max_spread:
+            print(f"OK  spread filter: {spread:.2f} <= cap {args.max_spread}")
+        else:
+            print(f"FAIL spread filter: {spread:.2f} > cap {args.max_spread}")
 
     if not args.place_test_order:
+        if args.max_spread is not None and spread > args.max_spread:
+            mt5.shutdown()
+            raise SystemExit("spread filter FAILED - live spread is wider "
+                             "than your cap right now")
         print("\nAll checks passed. Add --place-test-order to test a full "
               "order round-trip (on a REAL account also add --allow-real; "
               "costs ~1 spread + commission).")
@@ -88,6 +103,20 @@ def main():
     if getattr(info, "volume_min", 0.0) and args.lots < info.volume_min:
         raise SystemExit(f"--lots {args.lots} is below this broker's minimum "
                          f"of {info.volume_min} for {args.symbol}")
+
+    if args.max_spread is not None:
+        for _ in range(15):                    # give it up to 15s to tighten
+            tick = mt5.symbol_info_tick(args.symbol)
+            spread = tick.ask - tick.bid
+            if spread <= args.max_spread:
+                break
+            print(f"    spread {spread:.2f} > cap {args.max_spread}, "
+                  f"waiting for it to tighten...")
+            time.sleep(1)
+        else:
+            mt5.shutdown()
+            raise SystemExit(f"spread stayed above cap {args.max_spread} "
+                             f"for 15s - test order NOT sent")
 
     px = tick.ask
     req = {"action": mt5.TRADE_ACTION_DEAL, "symbol": args.symbol,

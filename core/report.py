@@ -55,6 +55,25 @@ def print_report(broker, title="BACKTEST RESULT", point_value=100.0):
     print(f"  avg win / loss  : {wins.mean() if len(wins) else 0:+.2f} / "
           f"{losses.mean() if len(losses) else 0:+.2f} pts")
     print(f"  best / worst    : {pts.max():+.1f} / {pts.min():+.1f} pts")
+
+    # longest winning / losing streaks (consecutive trades, in entry order;
+    # a break-even trade ends both streaks)
+    def _streak(win: bool):
+        best_n, best_s, n, s = 0, 0.0, 0, 0.0
+        for v in pts:
+            if (v > 0) if win else (v < 0):
+                n += 1
+                s += v
+                if n > best_n or (n == best_n and abs(s) > abs(best_s)):
+                    best_n, best_s = n, s
+            else:
+                n, s = 0, 0.0
+        return best_n, best_s
+
+    wn, ws = _streak(True)
+    ln, ls = _streak(False)
+    print(f"  max consec wins : {wn} trades   ({ws:+,.1f} pts, ${ws*point_value:+,.0f})")
+    print(f"  max consec loss : {ln} trades   ({ls:+,.1f} pts, ${ls*point_value:+,.0f})")
     print(f"  max drawdown    : {dd:,.1f} pts   (${dd*point_value:,.0f})")
     print(f"  open positions  : {len(broker.positions)}")
 

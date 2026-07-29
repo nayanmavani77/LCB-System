@@ -239,11 +239,14 @@ different sl_mode = a clean exit-geometry experiment on identical entries.
 | `--lots 0.01` | size used by the test order (must be ≥ the broker's minimum lot) | 0.01 |
 | `--place-test-order` | full order round-trip: opens + closes a test position. On a DEMO account it runs directly; on a REAL account it refuses unless `--allow-real` is also given | off |
 | `--allow-real` | permit the test order on a REAL account: prints the estimated cost (~1 spread × test lot + commission) and requires you to **type the account number back** before any order is sent. Anything else typed = abort, no order | off |
+| `--max-spread 0.9` | spread filter in price units (same idea as the engines' `--max-spread` gate). Checks-only run: prints OK/FAIL and exits with an error if the live spread is wider than the cap. With `--place-test-order`: waits up to 15 s for the spread to tighten under the cap, then aborts **without sending the order** if it never does | off (no filter) |
 
 ```
 python scripts/test_mt5.py --symbol XAUUSD+                                      # checks only (safe on any account)
+python scripts/test_mt5.py --symbol XAUUSD+ --max-spread 0.9                     # checks + spread filter (FAIL if wider)
 python scripts/test_mt5.py --symbol XAUUSD+ --place-test-order                  # demo round-trip
 python scripts/test_mt5.py --symbol XAUUSD+ --place-test-order --allow-real     # REAL account round-trip (typed confirmation)
+python scripts/test_mt5.py --symbol XAUUSD+ --place-test-order --allow-real --max-spread 0.9   # real, but only if spread is sane
 ```
 
 The connection/account/symbol/spread checks (no `--place-test-order`) are
