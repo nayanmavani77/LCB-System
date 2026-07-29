@@ -76,6 +76,9 @@ class PaperBroker(Broker):
     # ------------------------------------------------------------- interface
     def market_order(self, ts, direction, qty, sl, tp, tag, ref_px=None):
         px = self.ask if direction > 0 else self.bid
+        if px != px:                       # NaN quote: no market yet - a fill
+            self.log(f"PAPER order DROPPED (no quote yet) [{tag}]")
+            return                         # here would corrupt every metric
         pos = Position(ts, direction, qty, px, sl, tp, tag)
         self.positions.append(pos)
         self.log(f"FILL {'BUY' if direction>0 else 'SELL'} {qty} @ {px:.2f} "

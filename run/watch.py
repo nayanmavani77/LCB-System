@@ -252,9 +252,11 @@ class Tape:
         ask_d = sum(getattr(x, "ask_sz", 0) or 0 for x in levels)
         tot = bid_d + ask_d
         imb = (bid_d - ask_d) / tot if tot else 0.0
+        bb = f"{self.bid:.2f}" if self.bid is not None else "-"
+        aa = f"{self.ask:.2f}" if self.ask is not None else "-"
         self.out(f"          depth{len(levels)}  bid {bid_d:>6} | "
                  f"ask {ask_d:<6}  imb {imb:+.0%}  "
-                 f"[{self.bid:.2f}/{self.ask:.2f}]  CVD {self.cvd:+,.0f}")
+                 f"[{bb}/{aa}]  CVD {self.cvd:+,.0f}")
 
     def _minute_line(self):
         m = self.m

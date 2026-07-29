@@ -14,6 +14,7 @@ cd "C:\Users\nayan\Desktop\Claude Workspace\LCB-System"
 |---|---|
 | `pip install databento pandas pyarrow zstandard numpy` | install everything the backtest needs |
 | `pip install MetaTrader5` | install the MT5 bridge (live trading only) |
+| `python tests/test_system.py` | run the self-test suite (engine behavior locks, broker mechanics, session boundaries, report integrity) — run after any code change or `git pull` |
 | create `config.py` in the project root (template below) | API key + optional MT5 login (config.py is gitignored — secrets stay private) |
 
 `config.py` template:
@@ -333,6 +334,7 @@ trade events feed the CVD (a resting ask-side add is a quote, not a sale).
 | `run\backtest.py` / `run\live.py` | the two runners (same engines, same flags) |
 | `run\watch.py` | live data watcher: any schema, tape + cumulative delta (read-only) |
 | `scripts\` | data prep, data download, MT5 connection test |
+| `tests\test_system.py` | self-test suite — `python tests/test_system.py` |
 | `logs\` | ALL generated output: trade CSVs, MT5 signal logs, state files (gitignored) |
 | `config.py` | your secrets (gitignored) |
 | `Data\` / `data_cache\` | raw DBN files / parquet cache (both gitignored) |

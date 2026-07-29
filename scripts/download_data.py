@@ -44,7 +44,13 @@ def main():
     raw = os.path.join(RAW_BASE, sym["name"])
     os.makedirs(raw, exist_ok=True)
 
-    hist = db.Historical(get_api_key())
+    key = get_api_key()
+    if not key:
+        raise SystemExit(
+            "No Databento API key found. Create config.py with "
+            "DATABENTO_API_KEY (template: docs/COMMANDS.md, section 1) "
+            "or set the DATABENTO_API_KEY environment variable.")
+    hist = db.Historical(key)
     tag = sym["name"].lower()
     jobs = [
         ("tbbo", "continuous", [sym["continuous"]],

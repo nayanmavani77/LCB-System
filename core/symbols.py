@@ -1,7 +1,7 @@
 """Symbol registry - everything symbol-specific lives HERE, not in the engines.
 
-The strategy engines (lrev/strategy.py, lrev/defend.py) are price-scale
-agnostic and are NOT modified per symbol. What differs per symbol:
+The strategy engines (engines/*.py) are price-scale agnostic and are NOT
+modified per symbol. What differs per symbol:
 
   dataset      Databento dataset (all CME metals/energy = GLBX.MDP3)
   continuous   volume-based front-month symbol for TBBO (X.v.0)
@@ -71,5 +71,5 @@ def get_symbol(name: str) -> dict:
     if key not in SYMBOLS:
         raise SystemExit(
             f"unknown symbol '{name}'. Known: {', '.join(sorted(SYMBOLS))}. "
-            f"Add new symbols in lrev/symbols.py (one dict entry).")
+            f"Add new symbols in core/symbols.py (one dict entry).")
     return dict(SYMBOLS[key], name=key)

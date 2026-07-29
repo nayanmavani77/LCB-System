@@ -45,6 +45,11 @@ class MT5Broker(Broker):
         self.lots = lots
         self.deviation = deviation_points
         self._oc_cache = {}
+        # tag -> position ticket, filled on our own orders. Primary lookup
+        # for open_count/close_position; the comment match is only the
+        # fallback (brokers may rewrite/truncate deal comments, and the map
+        # is empty for positions opened before a restart).
+        self._tickets: dict[str, int] = {}
         self.log = log
         self.signal_log_path = signal_log_path
         if signal_log_path and not os.path.exists(signal_log_path):
@@ -162,8 +167,17 @@ class MT5Broker(Broker):
             # retry once with FOK filling (broker-dependent)
             request["type_filling"] = mt5.ORDER_FILLING_FOK
             result = mt5.order_send(request)
+        if result is None:      # terminal dropped mid-retry - do not crash
+            self.log(f"MT5 order_send returned None on retry: "
+                     f"{mt5.last_error()} [{tag}] - VERIFY POSITION MANUALLY")
+            self._log_row(ts, direction, tag, ref_px, sl, tp, sl_dist, tp_dist,
+                          round(tick.bid, 2), round(tick.ask, 2),
+                          sl_x=sl_x, tp_x=tp_x, status="SEND_ERROR_RETRY")
+            return
         ok = result.retcode == mt5.TRADE_RETCODE_DONE
         if ok:
+            self._tickets[tag] = result.order    # robust close/count lookup
+            self._oc_cache.clear()               # cache is stale immediately
             self.log(f"MT5 {'BUY' if direction > 0 else 'SELL'} {self.lots} "
                      f"{self.symbol} @ {result.price:.2f} SL {sl_x} TP {tp_x} "
                      f"[{tag}]")
@@ -200,9 +214,18 @@ class MT5Broker(Broker):
 
     # ------------------------------------------------------------- queries
     def _my_positions(self, tag_prefix: str = ""):
+        """Our open positions matching a tag prefix: by TICKET first (from
+        orders we sent this session), by comment as fallback."""
         pos = self.mt5.positions_get(symbol=self.symbol) or []
-        return [p for p in pos
-                if p.magic == MAGIC and p.comment.startswith(tag_prefix)]
+        mine = [p for p in pos if p.magic == MAGIC]
+        live_tickets = {p.ticket for p in mine}
+        # prune tickets whose positions are gone (closed by SL/TP)
+        self._tickets = {t: k for t, k in self._tickets.items()
+                         if k in live_tickets}
+        wanted = {k for t, k in self._tickets.items()
+                  if t.startswith(tag_prefix)}
+        return [p for p in mine
+                if p.ticket in wanted or p.comment.startswith(tag_prefix)]
 
     def open_count(self, tag_prefix: str = "") -> int:
         # 1s TTL cache: engines may query this per tick; a terminal RPC per
@@ -217,11 +240,13 @@ class MT5Broker(Broker):
         return n
 
     def close_position(self, ts, tag: str) -> bool:
-        """Close our open position whose comment matches the tag (used by
-        engines for time stops). Sends an opposite DEAL against the ticket."""
+        """Close our open position for this tag (used by engines for time
+        stops): ticket lookup first, comment match as fallback. Sends an
+        opposite DEAL against the ticket."""
         mt5 = self.mt5
+        want_ticket = self._tickets.get(tag)
         for p in self._my_positions():
-            if p.comment != tag[:31]:
+            if p.ticket != want_ticket and p.comment != tag[:31]:
                 continue
             tick = mt5.symbol_info_tick(self.symbol)
             if tick is None:
@@ -248,6 +273,8 @@ class MT5Broker(Broker):
                 result = mt5.order_send(request)
             ok = result is not None and result.retcode == mt5.TRADE_RETCODE_DONE
             if ok:
+                self._tickets.pop(tag, None)
+                self._oc_cache.clear()           # count changed right now
                 self.log(f"MT5 CLOSED position {p.ticket} @ "
                          f"{result.price:.2f} [{tag}]")
             else:

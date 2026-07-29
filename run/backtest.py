@@ -13,7 +13,9 @@ Configs:
     v1       no gates (original L-System behaviour)
 
 Dates outside the cached data are clamped. Build the cache first with
-scripts/prep.py. P&L is net of quoted spread at fill + 0.15 pts/round turn.
+scripts/prep.py. P&L is net of the quoted spread at fill plus a
+commission+slippage charge per round turn (--cost; default per-symbol
+from core/symbols.py, GC = 0.4 pts).
 """
 import argparse
 import os
@@ -89,7 +91,14 @@ def main():
             root, ext = os.path.splitext(csv_path)
             csv_path = f"{root}_{sym['name']}{ext or '.csv'}"
         if csv_path and os.path.exists(csv_path):
-            os.remove(csv_path)
+            try:
+                os.remove(csv_path)
+            except OSError:
+                # e.g. the file is open in Excel on Windows - do not crash,
+                # and do not append into stale rows either: pick a new name
+                root, ext = os.path.splitext(csv_path)
+                csv_path = f"{root}_{pd.Timestamp.now():%Y%m%d%H%M%S}{ext}"
+                print(f"note: old CSV is locked; writing to {csv_path}")
 
         strategy_cls = ENGINES[args.engine]
         base = dict(CONFIGS[args.config])
@@ -106,8 +115,11 @@ def main():
                                log=(print if args.verbose else None),
                                strategy_cls=strategy_cls, cost_pts=cost,
                                point_value=sym["point_value"])
+        # the v1/v2 config presets only shape the lrev gates - stamping them
+        # on other engines' reports is misleading
+        label = args.config if args.engine == "lrev" else args.engine
         print_report(broker, point_value=sym["point_value"],
-                     title=f"BACKTEST RESULT  [{sym['name']} {args.config}]  "
+                     title=f"BACKTEST RESULT  [{sym['name']} {label}]  "
                            f"{t0.date()} .. {t1.date()}")
         if csv_path:
             print("\ntrade log:", csv_path)

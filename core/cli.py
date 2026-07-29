@@ -70,6 +70,12 @@ def config_from_args(args, base: dict | None = None) -> dict:
         key, raw = key.strip(), raw.strip()
         if not sep or not key:
             raise SystemExit(f"--set expects KEY=VALUE, got '{kv}'")
+        if key not in cfg:
+            # a typo here would otherwise do NOTHING silently - dangerous
+            # when the user believes e.g. a kill switch is active
+            print(f"WARNING: --set {key}=... is not an existing config key "
+                  f"for this engine (check the engine file's CONFIG dict); "
+                  f"setting it anyway")
         try:
             val = int(raw)
         except ValueError:

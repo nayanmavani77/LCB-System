@@ -217,7 +217,7 @@ def main():
     ap.add_argument("--cost", type=float, default=0.4,
                     help="paper-mode commission+slippage per round turn (points)")
     ap.add_argument("--state-json", default=None,
-                    help="state snapshot (default: lrev_state_<SYMBOL>.json)")
+                    help="state snapshot (default: logs/state_<SYMBOL>.json)")
     from core.cli import add_strategy_args, config_from_args, describe
     from core.paths import log_path
     add_strategy_args(ap)
@@ -281,7 +281,7 @@ def main():
     # e.g. G-Trend needs ~170 for its 50-session MA + slope + z windows)
     warmup_days = getattr(strategy_cls, "WARMUP_DAYS", 20)
     hist = db.Historical(api_key)
-    end = pd.Timestamp.utcnow().floor("min") - pd.Timedelta(minutes=10)
+    end = pd.Timestamp.now(tz="UTC").floor("min") - pd.Timedelta(minutes=10)
     m1 = None
     for backoff_h in (0, 6, 24, 48):   # historical can lag real time
         try:

@@ -89,7 +89,9 @@ def print_report(broker, title="BACKTEST RESULT", point_value=100.0):
 
     if "tag" in df.columns:
         tf = df["tag"].astype(str).str.split("|").str[1]
-        if tf.notna().any():
+        # only the level engines encode a timeframe there; other engines'
+        # tags would render a misleading pseudo-"timeframe" table
+        if tf.notna().any() and tf.dropna().isin(["M15", "H1", "H4"]).all():
             df["timeframe"] = tf
             block("by timeframe", "timeframe")
     df["direction"] = df["dir"].map({1: "long", -1: "short"})
@@ -124,7 +126,7 @@ def print_portfolio(dfs):
     print(f"\n{line}\n  PORTFOLIO RESULT (symbols combined, in $)\n{line}")
     print("  " + pd.DataFrame(rows).to_string(index=False).replace("\n", "\n  "))
     port = (pd.concat(frames, ignore_index=True)
-            .sort_values("ts_close").reset_index(drop=True))
+            .sort_values("ts_close", kind="stable").reset_index(drop=True))
     usd = port["pnl_usd"]
     eq = usd.cumsum()
     dd = (eq.cummax() - eq).max()
