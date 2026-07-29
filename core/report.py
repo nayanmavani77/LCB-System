@@ -87,6 +87,10 @@ def print_report(broker, title="BACKTEST RESULT", point_value=100.0):
     print("\n  -- by month " + "-" * 36)
     print("  " + t.to_string().replace("\n", "\n  "))
 
+    # by hour of ENTRY (UTC) - shows which sessions pay and which bleed
+    df["hour"] = dt_naive.dt.hour.map(lambda h: f"{h:02d} UTC")
+    block("by entry hour (UTC; IST = UTC+5:30)", "hour")
+
     if "tag" in df.columns:
         tf = df["tag"].astype(str).str.split("|").str[1]
         # only the level engines encode a timeframe there; other engines'

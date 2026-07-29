@@ -228,6 +228,8 @@ def t_report_qty_weighting_and_tf_block():
     out = buf.getvalue()
     assert "by timeframe" not in out                  # GT tag != timeframe
     assert "$+45" in out                              # 0.9 pts x 0.5 x $100
+    assert "by entry hour" in out and "00 UTC" in out # hourly P&L block
+    # hourly block groups by ENTRY hour: ts_open=1s epoch -> hour 00
     # and an lrev-style tag DOES get the block
     b2 = PaperBroker(trade_log_path=None, cost_pts=0.0, log=lambda *a: None)
     b2.on_tick(1, 99.9, 100.1)
