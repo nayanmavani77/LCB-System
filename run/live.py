@@ -77,8 +77,8 @@ def _parse_specs(spec_str, default_mt5, default_lots):
     """Parse --symbols. Each item: NAME[:MT5SYMBOL[:LOTS[:ENGINE]]].
     e.g.  GC                          -> registry MT5 symbol, --lots, --engine
           GC:XAUUSD+                  -> explicit MT5 symbol, --lots
-          GC:XAUUSD+:0.01,SI:XAGUSD+:0.02          -> two symbols
-          GC:XAUUSD+:0.01:lrev,GC:XAUUSD+:0.01:ldef -> two ENGINES, one symbol
+          GC:XAUUSD+:0.01,SI:XAGUSD+:0.02            -> two symbols
+          GC:XAUUSD+:0.01:lrev,GC:XAUUSD+:0.01:gtrend -> two ENGINES, one symbol
     """
     from core.symbols import get_symbol
     from engines import ENGINES

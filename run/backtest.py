@@ -48,8 +48,8 @@ def main():
     ap.add_argument("--config", default="v2-flow", choices=sorted(CONFIGS))
     from engines import ENGINES
     ap.add_argument("--engine", default="lrev", choices=sorted(ENGINES),
-                    help="strategy engine from engines/ (lrev = level BREAK, "
-                         "validated; ldef = level DEFEND, experimental)")
+                    help="strategy engine from the engines/__init__.py "
+                         "registry (lrev = validated level-break)")
     ap.add_argument("--csv", default=None, help="save the trade list to CSV")
     ap.add_argument("--cost", type=float, default=None,
                     help="commission+slippage per round turn in price units "

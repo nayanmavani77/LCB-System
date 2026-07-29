@@ -27,7 +27,7 @@ def add_strategy_args(ap):
                    help="flow gate upper bound (default 0.6)")
     g.add_argument("--set", action="append", default=[], metavar="KEY=VALUE",
                    help="override ANY engine config key, repeatable - e.g. "
-                        "--set delta_threshold=0.7 --set require_color=true")
+                        "--set allow_short=false --set max_hold=15")
 
 
 def config_from_args(args, base: dict | None = None) -> dict:

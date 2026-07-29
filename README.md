@@ -16,7 +16,7 @@ implementation, so backtest behaviour == live behaviour by construction.
       live.py          streams real-time ticks through an engine (paper or MT5)
     engines/         STRATEGIES - one file per engine, add new ones here
       lrev.py          L-Rev: level-BREAK engine (validated on GC, OOS on SI)
-      ldef.py          L-Def: level-DEFEND engine (experimental, tested negative)
+      gtrend.py        G-Trend: daily trend-pullback engine (GC only)
     core/            shared machinery (engine-agnostic)
       broker.py        Broker interface + PaperBroker simulator
       mt5_broker.py    MT5 execution adapter (futures signals -> CFD orders)
