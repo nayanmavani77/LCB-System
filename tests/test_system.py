@@ -394,6 +394,37 @@ def t_retf_breakeven_time_exit_session():
     assert f3 == []                       # ticks are 00:00-05:00 UTC
 
 
+def t_retf_no_lookahead():
+    """Publication-schedule immunity proof: perturbing every tick AFTER a
+    cutoff by +500 pts must leave every entry BEFORE the cutoff
+    byte-identical. Replay feeds ticks in EVENT time, so historical files
+    being published later (e.g. 20:00) cannot leak future data into
+    earlier decisions."""
+    up = list(np.linspace(2000, 2400, 300))
+    ticks = _retf_ticks(up)
+    cutoff = ticks[len(ticks) // 2][0]
+    cfg = {"ema_period": 10, "entry_prob": 1.0, "sl_points": 5, "rr": 3}
+
+    def run(perturb):
+        from engines.retf import RETFStrategy
+        b = PaperBroker(trade_log_path=None, cost_pts=0.0, log=lambda *a: None)
+        entries = []
+        orig = b.market_order
+        def spy(ts, d, q, sl, tp, tag, ref_px=None):
+            entries.append((ts, d, round(sl, 6), round(tp, 6), tag))
+            orig(ts, d, q, sl, tp, tag, ref_px=ref_px)
+        b.market_order = spy
+        s = RETFStrategy(b, config=dict(cfg), log=lambda *a: None)
+        for ts, px in ticks:
+            p = px + (500.0 if (perturb and ts >= cutoff) else 0.0)
+            b.on_tick(ts, p - 0.1, p + 0.1)
+            s.on_tick(ts, p, 1.0, "N", p - 0.1, p + 0.1)
+        return [e for e in entries if e[0] < cutoff]
+
+    base, pert = run(False), run(True)
+    assert base and base == pert, "RETF lookahead detected!"
+
+
 def t_retf_stop_modes():
     """sl_mode points/atr/mtr: ATR = mean TR (feels outliers), MTR = median
     TR (ignores them), computed over vol_window closed bars; fail-closed
