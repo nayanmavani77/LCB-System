@@ -84,7 +84,7 @@ python run/backtest.py --start YYYY-MM-DD --end YYYY-MM-DD
 | `--engine` | `lrev` (validated level-break) / `gtrend` (daily trend-pullback) / `gtrend-lowdd` (same rules, lower drawdown) / `retf` (random entry + EMA trend filter — benchmark) | lrev |
 | `--config` | lrev gate presets: `v2-flow` (all gates) / `v2-ea` (no flow gate) / `v1` (no gates) | v2-flow |
 | `--csv FILE.csv` | save every trade to a CSV (written into `logs\`; one file per symbol when multi-symbol) | off |
-| `--cost 0.4` | commission+slippage per round turn in points (spread is separately embedded in fills) | per-symbol value from `core/symbols.py` |
+| `--cost 0.2` | commission+slippage per round turn in points, BEYOND the quoted spread (which is separately embedded in fills) | per-symbol value from `core/symbols.py` (GC: 0.2, user-measured Jul 2026) |
 | `--verbose` | print every level, gate decision and fill | off |
 | *strategy flags* | all of section 4 (`--rr`, `--sl-*`, `--set KEY=VALUE`, ...) work here too | — |
 
@@ -261,7 +261,7 @@ Expert Advisors → "Allow algorithmic trading" enabled.
 | `--mt5-symbol XAUUSD+` | MT5 symbol override | registry (GC→XAUUSD) |
 | `--lots 0.01` | lots per entry (per-symbol override via `--symbols`) | 0.01 |
 | `--no-flow-gate` | run the v2-ea configuration live (lrev) | off |
-| `--cost 0.4` | paper-mode commission+slippage per round turn (points) | 0.4 |
+| `--cost 0.2` | paper-mode commission+slippage per round turn (points) | per-symbol from `core/symbols.py` |
 | `--trades-csv F` | paper trade log path | `logs\paper_trades_<SYM>.csv` |
 | `--state-json F` | state snapshot path (written on exit) | `logs\state_<SYM>.json` |
 | *strategy flags* | all of section 4 (`--rr`, `--sl-*`, `--set`, ...) | — |

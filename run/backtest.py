@@ -15,7 +15,7 @@ Configs:
 Dates outside the cached data are clamped. Build the cache first with
 scripts/prep.py. P&L is net of the quoted spread at fill plus a
 commission+slippage charge per round turn (--cost; default per-symbol
-from core/symbols.py, GC = 0.4 pts).
+from core/symbols.py, GC = 0.2 pts).
 """
 import argparse
 import os

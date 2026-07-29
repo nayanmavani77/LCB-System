@@ -26,7 +26,10 @@ SYMBOLS = {
         "point_value": 100.0,          # 100 oz x $1
         "mt5_symbol": "XAUUSD",
         "mt5_lot_note": "1.00 lot XAUUSD = 100 oz = 1 GC contract",
-        "max_spread": 0.90, "cost_pts": 0.40,
+        # cost_pts = commission + slippage BEYOND the quoted spread (the
+        # spread itself is embedded in fills). User-measured 0.20 (Jul 2026);
+        # re-measure from logs/mt5_signals_*.csv as conditions change.
+        "max_spread": 0.90, "cost_pts": 0.20,
     },
     "SI": {   # COMEX Silver
         "dataset": "GLBX.MDP3", "continuous": "SI.v.0", "parent": "SI.FUT",

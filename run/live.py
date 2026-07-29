@@ -214,8 +214,9 @@ def main():
                     help="default lots (per-symbol override via --symbols)")
     ap.add_argument("--trades-csv", default=None,
                     help="paper trade log (default: paper_trades_<SYMBOL>.csv)")
-    ap.add_argument("--cost", type=float, default=0.4,
-                    help="paper-mode commission+slippage per round turn (points)")
+    ap.add_argument("--cost", type=float, default=None,
+                    help="paper-mode commission+slippage per round turn "
+                         "(points; default: per-symbol from core/symbols.py)")
     ap.add_argument("--state-json", default=None,
                     help="state snapshot (default: logs/state_<SYMBOL>.json)")
     from core.cli import add_strategy_args, config_from_args, describe
@@ -264,8 +265,9 @@ def main():
                            signal_symbol=sym["name"],
                            signal_log_path=log_path(f"mt5_signals_{tag}.csv"))
     else:
+        cost = args.cost if args.cost is not None else sym["cost_pts"]
         broker = PaperBroker(trade_log_path=args.trades_csv,
-                             cost_pts=args.cost,
+                             cost_pts=cost,
                              point_value=sym["point_value"])
     strategy_cls = ENGINES[args.engine]
     base = {"use_flow_gate": not args.no_flow_gate}
