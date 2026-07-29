@@ -236,13 +236,20 @@ different sl_mode = a clean exit-geometry experiment on identical entries.
 | Option | Meaning | Default |
 |---|---|---|
 | `--symbol XAUUSD+` | MT5 symbol to check (connection, account, algo-trading setting, live spread) | XAUUSD |
-| `--lots 0.01` | size used by the test order | 0.01 |
-| `--place-test-order` | full order round-trip: opens + closes a test position (DEMO accounts only — refuses on real) | off |
+| `--lots 0.01` | size used by the test order (must be ≥ the broker's minimum lot) | 0.01 |
+| `--place-test-order` | full order round-trip: opens + closes a test position. On a DEMO account it runs directly; on a REAL account it refuses unless `--allow-real` is also given | off |
+| `--allow-real` | permit the test order on a REAL account: prints the estimated cost (~1 spread × test lot + commission) and requires you to **type the account number back** before any order is sent. Anything else typed = abort, no order | off |
 
 ```
-python scripts/test_mt5.py --symbol XAUUSD+
-python scripts/test_mt5.py --symbol XAUUSD+ --place-test-order
+python scripts/test_mt5.py --symbol XAUUSD+                                      # checks only (safe on any account)
+python scripts/test_mt5.py --symbol XAUUSD+ --place-test-order                  # demo round-trip
+python scripts/test_mt5.py --symbol XAUUSD+ --place-test-order --allow-real     # REAL account round-trip (typed confirmation)
 ```
+
+The connection/account/symbol/spread checks (no `--place-test-order`) are
+read-only and safe to run on **any** account, real included — nothing is
+ever sent to the broker. Only the round-trip test costs money on a real
+account: roughly one spread + commission on the test lot.
 
 MT5 terminal must be **running and logged in**, with Tools → Options →
 Expert Advisors → "Allow algorithmic trading" enabled.

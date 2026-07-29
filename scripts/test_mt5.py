@@ -2,11 +2,16 @@
 
     python scripts/test_mt5.py --symbol XAUUSD
     python scripts/test_mt5.py --symbol XAUUSD --place-test-order
+    python scripts/test_mt5.py --symbol XAUUSD --place-test-order --allow-real
 
 Checks: package installed, terminal reachable, account logged in, symbol
 exists and is tradeable. With --place-test-order it opens a 0.01-lot BUY
-with a wide SL/TP and closes it seconds later (costs ~1 spread on DEMO;
-do NOT run it on a real account).
+with a wide SL/TP and closes it seconds later (costs ~1 spread).
+
+On a REAL account --place-test-order refuses unless you also pass
+--allow-real, which prints the estimated cost of the round-trip and makes
+you type the account number back before any order is sent. Real money:
+the test costs roughly one spread + commission on the test lot.
 """
 import argparse
 import time
@@ -17,6 +22,10 @@ def main():
     ap.add_argument("--symbol", default="XAUUSD")
     ap.add_argument("--lots", type=float, default=0.01)
     ap.add_argument("--place-test-order", action="store_true")
+    ap.add_argument("--allow-real", action="store_true",
+                    help="permit --place-test-order on a REAL account "
+                         "(asks you to type the account number to confirm; "
+                         "costs ~1 spread + commission on the test lot)")
     args = ap.parse_args()
 
     try:
@@ -47,13 +56,38 @@ def main():
           f"spread {(tick.ask - tick.bid):.2f}")
 
     if not args.place_test_order:
-        print("\nAll checks passed. Add --place-test-order (DEMO only!) to "
-              "test a full order round-trip.")
+        print("\nAll checks passed. Add --place-test-order to test a full "
+              "order round-trip (on a REAL account also add --allow-real; "
+              "costs ~1 spread + commission).")
         mt5.shutdown()
         return
 
     if acct.trade_mode != 0:
-        raise SystemExit("refusing --place-test-order: this is NOT a demo account")
+        if not args.allow_real:
+            raise SystemExit(
+                "refusing --place-test-order: this is NOT a demo account.\n"
+                "To test the order round-trip on this REAL account anyway "
+                "(costs ~1 spread + commission on the test lot), add "
+                "--allow-real. You will be asked to confirm.")
+        # explicit, typed confirmation before touching real money
+        contract = getattr(info, "trade_contract_size", 0.0) or 0.0
+        est = (tick.ask - tick.bid) * contract * args.lots
+        print(f"\n*** REAL ACCOUNT {acct.login} on {acct.server} ***")
+        print(f"    test trade: BUY {args.lots} lot {args.symbol}, closed "
+              f"~3s later")
+        print(f"    estimated cost: ~{est:.2f} {acct.currency} "
+              f"(one spread x {args.lots} lot) + broker commission")
+        ans = input(f"    type the account number ({acct.login}) to "
+                    f"confirm, anything else aborts: ")
+        if ans.strip() != str(acct.login):
+            mt5.shutdown()
+            raise SystemExit("confirmation did not match - aborted, "
+                             "NO order was sent")
+        tick = mt5.symbol_info_tick(args.symbol)   # refresh after the pause
+
+    if getattr(info, "volume_min", 0.0) and args.lots < info.volume_min:
+        raise SystemExit(f"--lots {args.lots} is below this broker's minimum "
+                         f"of {info.volume_min} for {args.symbol}")
 
     px = tick.ask
     req = {"action": mt5.TRADE_ACTION_DEAL, "symbol": args.symbol,
