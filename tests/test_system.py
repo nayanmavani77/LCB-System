@@ -210,6 +210,31 @@ def t_broker_nan_guard():
     assert b.positions == [] and b.closed == []
 
 
+def t_broker_stale_quote_guard():
+    """A market order can never fill BETTER than the reference trade
+    price. Around session reopens the TBBO bid/ask can lag a gapped trade
+    by many points; without the clamp a backtest books the overnight gap
+    as fictional profit (TP exits > TP distance, winning 'sl' exits)."""
+    b = PaperBroker(trade_log_path=None, cost_pts=0.0, log=lambda *a: None)
+    b.on_tick(1, 4050.2, 4050.4)                 # stale pre-halt book
+    # price gapped up: trade printed 4062, engine anchors there
+    b.market_order(2, 1, 1, sl=4059.0, tp=4077.0, tag="T|gapL",
+                   ref_px=4062.0)
+    assert b.positions[0].entry == 4062.0        # clamped, not 4050.4
+    b.on_tick(3, 4077.0, 4077.2)                 # TP hit
+    assert abs(b.closed[-1]["pnl_pts"] - 15.0) < 1e-9   # exactly TP dist
+    # short mirror: stale bid above the gapped-down trade
+    b.on_tick(4, 4049.8, 4050.0)
+    b.market_order(5, -1, 1, sl=4041.0, tp=4023.0, tag="T|gapS",
+                   ref_px=4038.0)
+    assert b.positions[0].entry == 4038.0
+    # normal ticks are untouched: ask >= trade -> clamp is a no-op
+    b2 = PaperBroker(trade_log_path=None, cost_pts=0.0, log=lambda *a: None)
+    b2.on_tick(1, 99.9, 100.1)
+    b2.market_order(2, 1, 1, sl=95.0, tp=105.0, tag="T|norm", ref_px=100.0)
+    assert b2.positions[0].entry == 100.1
+
+
 def t_report_qty_weighting_and_tf_block():
     """Report must size-weight by qty and must NOT print a fake timeframe
     table for non-lrev tags (REVIEW FIX)."""

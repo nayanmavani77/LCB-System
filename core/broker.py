@@ -84,6 +84,14 @@ class PaperBroker(Broker):
         if px != px:                       # NaN quote: no market yet - a fill
             self.log(f"PAPER order DROPPED (no quote yet) [{tag}]")
             return                         # here would corrupt every metric
+        # STALE-QUOTE GUARD: around session halts/reopens the TBBO bid/ask
+        # can lag a gapped trade price by many points. A market order can
+        # NEVER fill better than the price that just traded - without this
+        # clamp, session-open backtests book the entire overnight gap as
+        # fictional profit (the tell: TP exits paying more than the TP
+        # distance, and "sl" exits showing wins).
+        if ref_px is not None and ref_px == ref_px:
+            px = max(px, ref_px) if direction > 0 else min(px, ref_px)
         pos = Position(ts, direction, qty, px, sl, tp, tag)
         self.positions.append(pos)
         self.log(f"FILL {'BUY' if direction>0 else 'SELL'} {qty} @ {px:.2f} "
