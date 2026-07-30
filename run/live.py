@@ -30,6 +30,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import pandas as pd
 
 from core.broker import PaperBroker
+from core.data import ns_index
 from engines import ENGINES, Bar, TF_SECONDS
 
 
@@ -52,6 +53,54 @@ class _Tee:
             self._f.flush()
         except Exception:
             pass
+
+
+def closed_bars(m1, tf_seconds):
+    """Resample 1-minute bars to `tf_seconds`, keeping ONLY bars the data
+    fully covers.
+
+    Without this the last resampled bar is a PARTIAL bar (e.g. at 18:47 the
+    M15 bin 18:45 holds two minutes). Seeding it does two kinds of damage:
+    its tiny true range drags the ATR down, and the live BarBuilder then
+    rebuilds the same 18:45 bar from ticks - so the warmup bar is counted
+    twice. The first bin is dropped for the same reason at the other end.
+    """
+    if not len(m1):
+        return m1
+    rule = f"{tf_seconds // 60}min"
+    bars = pd.DataFrame({
+        "open": m1["open"].resample(rule).first(),
+        "high": m1["high"].resample(rule).max(),
+        "low": m1["low"].resample(rule).min(),
+        "close": m1["close"].resample(rule).last(),
+        "volume": m1["volume"].resample(rule).sum(),
+    }).dropna(subset=["open"])
+    tf_ns = tf_seconds * 1_000_000_000
+    first_ns = int(m1.index[0].value)                    # first 1m bar opens
+    last_ns = int(m1.index[-1].value) + 60_000_000_000   # last 1m bar closes
+    bt = ns_index(bars.index)   # unit-safe: a us-resolution index would
+    # otherwise compare 1000x too small and let every bar through
+    return bars[(bt >= first_ns) & (bt + tf_ns <= last_ns)]
+
+
+def quote_ok(bid, ask, price):
+    """Reject impossible quotes. Databento encodes an undefined price as
+    INT64_MAX, which becomes ~9.2e9 after the 1e-9 scaling - feeding that to
+    the paper broker books fictional multi-billion-dollar fills, and feeding
+    it to a spread gate silently disables the gate. Also catches crossed and
+    absurdly wide books at halts/reopens."""
+    if not (bid == bid and ask == ask and price == price):
+        return False                                   # NaN
+    if bid <= 0 or ask <= 0 or price <= 0:
+        return False
+    if ask < bid:
+        return False                                   # crossed
+    if (ask - bid) > 0.10 * ask:
+        return False                                   # > 10% wide = broken
+    # the TRADE price can be UNDEF while the book is fine (and vice versa),
+    # so check it against the book too - generously, real prints do land
+    # outside the top of book, but never at half or double it
+    return 0.5 * bid <= price <= 2.0 * ask
 
 
 def get_api_key():
@@ -219,6 +268,21 @@ def main():
                          "(points; default: per-symbol from core/symbols.py)")
     ap.add_argument("--state-json", default=None,
                     help="state snapshot (default: logs/state_<SYMBOL>.json)")
+    ap.add_argument("--mt5-max-spread", type=float, default=None,
+                    help="spread cap in PRICE units on the traded MT5 symbol "
+                         "(default: the same value as the signal-side "
+                         "--max-spread; 0 disables). The engine's gate only "
+                         "sees the futures book - this one sees what you pay.")
+    ap.add_argument("--max-signal-age", type=float, default=120.0,
+                    help="refuse to send an order when the signal tick is "
+                         "older than this many seconds (default 120, 0 "
+                         "disables). Protects against acting on a lagging "
+                         "or replayed stream.")
+    ap.add_argument("--stall-timeout", type=float, default=300.0,
+                    help="force a reconnect when no tick arrives for this "
+                         "many seconds during market hours (default 300, 0 "
+                         "disables). A half-open socket otherwise blocks "
+                         "forever with no error.")
     from core.cli import add_strategy_args, config_from_args, describe
     from core.paths import log_path
     add_strategy_args(ap)
@@ -258,23 +322,36 @@ def main():
     print(f"session log: {session_log}")
 
     api_key = get_api_key()
-    if args.broker == "mt5":
-        from core.mt5_broker import MT5Broker
-        print(f"note: {sym['mt5_lot_note']}")
-        broker = MT5Broker(symbol=mt5_symbol, lots=args.lots,
-                           signal_symbol=sym["name"],
-                           signal_log_path=log_path(f"mt5_signals_{tag}.csv"))
-    else:
-        cost = args.cost if args.cost is not None else sym["cost_pts"]
-        broker = PaperBroker(trade_log_path=args.trades_csv,
-                             cost_pts=cost,
-                             point_value=sym["point_value"])
+    # config BEFORE the broker: the MT5 adapter needs the engine's qty,
+    # spread cap and concurrency cap to build its own execution-side gates
     strategy_cls = ENGINES[args.engine]
     base = {"use_flow_gate": not args.no_flow_gate}
     base.update(getattr(strategy_cls, "CLI_DEFAULTS", {}))
     cfg = config_from_args(args, base=base)
     if args.max_spread is None:
         cfg["max_spread"] = sym["max_spread"]   # per-symbol default gate
+    if args.broker == "mt5":
+        from core.mt5_broker import MT5Broker
+        print(f"note: {sym['mt5_lot_note']}")
+        # The engine's own spread gate reads the GC futures book; the MT5
+        # book is what actually costs money, so the broker gets its OWN
+        # spread cap. Same for exposure: after a restart the engine starts
+        # flat while MT5 may still hold a position, so the cap is enforced
+        # against every MAGIC position the terminal reports.
+        broker = MT5Broker(symbol=mt5_symbol, lots=args.lots,
+                           signal_symbol=sym["name"],
+                           signal_log_path=log_path(f"mt5_signals_{tag}.csv"),
+                           max_spread=(args.mt5_max_spread
+                                       if args.mt5_max_spread is not None
+                                       else cfg.get("max_spread") or None),
+                           max_positions=cfg.get("max_concurrent"),
+                           min_qty=float(cfg.get("qty") or 1.0),
+                           max_signal_age_s=args.max_signal_age)
+    else:
+        cost = args.cost if args.cost is not None else sym["cost_pts"]
+        broker = PaperBroker(trade_log_path=args.trades_csv,
+                             cost_pts=cost,
+                             point_value=sym["point_value"])
     strat = strategy_cls(broker, config=cfg)
     print("strategy:", strategy_cls.describe(cfg)
           if hasattr(strategy_cls, "describe") else describe(cfg))
@@ -285,9 +362,18 @@ def main():
     hist = db.Historical(api_key)
     end = pd.Timestamp.now(tz="UTC").floor("min") - pd.Timedelta(minutes=10)
     m1 = None
-    for backoff_h in (0, 6, 24, 48):   # historical can lag real time
+    # try `end` first; when Databento rejects it, its error names the exact
+    # available end ("data available up to '...'") - retry with THAT instead
+    # of blindly backing off hours (a 6h hole in the bar history skews the
+    # first session's ATR/EMA). The fixed backoffs remain as the fallback.
+    attempts = [end] + [end - pd.Timedelta(hours=h) for h in (6, 24, 48)]
+    tried = set()
+    while attempts:
+        e = attempts.pop(0)
+        if e in tried:
+            continue
+        tried.add(e)
         try:
-            e = end - pd.Timedelta(hours=backoff_h)
             start = e - pd.Timedelta(days=warmup_days)
             print(f"bootstrapping bars {start} .. {e} ...")
             data = hist.timeseries.get_range(
@@ -298,33 +384,58 @@ def main():
             if len(m1):
                 break
         except Exception as exc:
+            import re as _re
+            m = _re.search(r"available up to '([^']+)'", str(exc))
+            if m:
+                try:
+                    avail = pd.Timestamp(m.group(1))
+                    avail = (avail.tz_localize("UTC") if avail.tz is None
+                             else avail.tz_convert("UTC")).floor("min")
+                    if avail < e and avail not in tried:
+                        attempts.insert(0, avail)   # retry at the exact edge
+                except (ValueError, TypeError):
+                    pass
             print(f"  historical not available yet ({exc}); backing off...")
     if m1 is None or not len(m1):
         print("WARNING: no warmup bars available - the engine will build bars "
               "from live ticks only (signals begin once enough bars form).")
         m1 = pd.DataFrame()
+    # Which RAW contract(s) the continuous warmup series is stitched from.
+    # A roll INSIDE the warmup window puts one artificial price jump (the
+    # basis between the two contracts) into the bar history, which inflates
+    # the true-range window and therefore an ATR stop. The backtest never
+    # sees this - it replays each contract segment separately - so this is a
+    # live-only distortion and worth saying out loud.
+    if len(m1) and "symbol" in m1.columns:
+        raws = list(dict.fromkeys(str(s) for s in m1["symbol"].dropna()))
+        if raws:
+            print(f"  warmup contract(s): {', '.join(raws)}")
+        if len(raws) > 1:
+            print(f"  WARNING: this {warmup_days}-day warmup window SPANS a "
+                  f"contract roll ({raws[0]} -> {raws[-1]}). The stitched "
+                  f"series holds one artificial price jump, so volatility "
+                  f"windows (ATR/MTR) read wider than reality until "
+                  f"~{cfg.get('vol_window', 20)} live bars have replaced it.")
     for tf, sec in TF_SECONDS.items():
         if not len(m1):
             break
-        rule = f"{sec // 60}min"
-        bars = pd.DataFrame({
-            "open": m1["open"].resample(rule).first(),
-            "high": m1["high"].resample(rule).max(),
-            "low": m1["low"].resample(rule).min(),
-            "close": m1["close"].resample(rule).last(),
-            "volume": m1["volume"].resample(rule).sum(),
-        }).dropna(subset=["open"])
+        # closed_bars(): only bars the 1m data fully covers. Seeding the
+        # PARTIAL last bin would both understate its true range and be
+        # rebuilt a second time by the live BarBuilder from ticks.
+        bars = closed_bars(m1, sec)
         strat.seed_bars(tf, [Bar(int(t), r.open, r.high, r.low, r.close, r.volume)
-                             for t, r in zip(bars.index.view("int64"),
+                             for t, r in zip(ns_index(bars.index),
                                              bars.itertuples())])
-        print(f"  {tf}: {len(bars)} warmup bars")
+        print(f"  {tf}: {len(bars)} warmup bars (fully closed only)")
 
     mode = ("PAPER trading" if args.broker == "paper"
             else f"LIVE orders -> MT5 {mt5_symbol} @ {args.lots} lots")
     print(f"subscribing to live TBBO ({sym['continuous']})... {mode}, Ctrl-C to stop")
+    import threading
     import time as _time
     RECONNECT_WAITS = (5, 15, 60, 300)   # escalating; stays at 5 min
     n_ticks = 0
+    n_bad = 0
     reconnects = 0
     stop = False
     try:
@@ -334,8 +445,48 @@ def main():
                              stype_in="continuous", symbols=[sym["continuous"]])
             last_beat = _time.time()
             fresh_connection = True
+            seen = {"at": _time.time()}
+            wd_stop = threading.Event()
+
+            def _watchdog(c=client, st=seen, ev=wd_stop,
+                          limit=float(args.stall_timeout or 0)):
+                """A half-open socket makes `for rec in client` block
+                FOREVER: no exception, no heartbeat, and the last line
+                printed still looks healthy - you only find out when a
+                session produced no trades. So watch the clock from the
+                side and force the reconnect path."""
+                warned = 0.0
+                while not ev.wait(5.0):
+                    idle = _time.time() - st["at"]
+                    if idle >= limit:
+                        print(f"[stall] no ticks for {idle:.0f}s "
+                              f"(limit {limit:.0f}s) - forcing a reconnect")
+                        try:
+                            c.stop()
+                        except Exception:
+                            pass
+                        return
+                    if idle >= limit / 2 and idle - warned >= limit / 2:
+                        warned = idle
+                        print(f"[idle] no ticks for {idle:.0f}s "
+                              f"(reconnect at {limit:.0f}s; normal when the "
+                              f"market is closed)")
+
+            if args.stall_timeout and args.stall_timeout > 0:
+                threading.Thread(target=_watchdog, daemon=True).start()
             try:
                 for rec in client:
+                    seen["at"] = _time.time()
+                    # Databento announces which RAW contract the continuous
+                    # symbol currently points at (volume-based: highest
+                    # volume on the PREVIOUS trading day, so around rolls it
+                    # can lag the crossover by a day - expect thin quotes)
+                    if isinstance(rec, db.SymbolMappingMsg):
+                        raw = (getattr(rec, "stype_out_symbol", "")
+                               or getattr(rec, "stype_in_symbol", "?"))
+                        print(f"[contract] {sym['continuous']} -> {raw} "
+                              f"(front month by prior-day volume)")
+                        continue
                     if not hasattr(rec, "price"):
                         continue
                     if fresh_connection:
@@ -347,6 +498,17 @@ def main():
                     bid = rec.bid_px_00 / 1e9
                     ask = rec.ask_px_00 / 1e9
                     px = rec.price / 1e9
+                    # Databento encodes an UNDEFINED price as INT64_MAX,
+                    # which becomes ~9.2e9 here. Unfiltered it books
+                    # fictional paper fills and makes every spread gate pass
+                    # (a 9-billion-wide book is not <= 0.9, but a 9-billion
+                    # ASK against a real bid is), so drop it at the door.
+                    if not quote_ok(bid, ask, px):
+                        n_bad += 1
+                        if n_bad <= 3 or n_bad % 1000 == 0:
+                            print(f"[quote] dropped invalid tick #{n_bad}: "
+                                  f"px={px:.6g} bid={bid:.6g} ask={ask:.6g}")
+                        continue
                     broker.on_tick(rec.ts_recv, bid, ask)
                     strat.on_tick(rec.ts_recv, px, rec.size, rec.side, bid, ask)
                     n_ticks += 1
@@ -355,15 +517,21 @@ def main():
                         status = (strat.status() if hasattr(strat, "status")
                                   else f"flow {strat.flow.imbalance():+.2f} | "
                                        f"{len(strat.levels)} levels armed")
+                        lag = max(0.0, now - rec.ts_recv / 1e9)
                         print(f"[heartbeat] {_time.strftime('%H:%M:%S UTC', _time.gmtime())} | "
                               f"{n_ticks:,} ticks so far | {sym['name']} "
-                              f"{bid:.2f}/{ask:.2f} | {status}")
+                              f"{bid:.2f}/{ask:.2f} | lag {lag:.1f}s"
+                              f"{f' | {n_bad} bad quotes dropped' if n_bad else ''}"
+                              f" | {status}")
                         last_beat = now
-                # iterator ended without an exception = gateway closed the session
+                # iterator ended without an exception = gateway closed the
+                # session (this is also how a watchdog stall lands here)
                 raise ConnectionError("live session closed by gateway")
             except KeyboardInterrupt:
+                wd_stop.set()
                 stop = True
             except Exception as exc:
+                wd_stop.set()
                 wait = RECONNECT_WAITS[min(reconnects, len(RECONNECT_WAITS) - 1)]
                 reconnects += 1
                 strat.save_state(args.state_json)

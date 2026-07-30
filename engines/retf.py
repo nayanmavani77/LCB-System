@@ -115,6 +115,20 @@ class RETFStrategy:
         self._open = None                     # {tag, entry_bar, dir, ref, be}
         self._last_close_bar = None
         self._n_trades = 0
+        # A tf_min outside _TF_NAME has no cached bar file, so seed_bars()
+        # silently does nothing: the EMA and the ATR window must then fill
+        # from LIVE ticks before the first entry is even considered. Silent
+        # is the dangerous part - the runner prints "0 warmup bars" and the
+        # session looks healthy while it can structurally never trade.
+        if _TF_NAME.get(int(cfg["tf_min"])) is None:
+            need = int(cfg["ema_period"]) * int(cfg["tf_min"]) / 60.0
+            self.log(f"[RETF] WARNING: tf_min={cfg['tf_min']} is not one of "
+                     f"{sorted(_TF_NAME)}, so NO cached bars exist at this "
+                     f"timeframe and warmup seeding is skipped. The EMA"
+                     f"({cfg['ema_period']}) and the {cfg['vol_window']}-bar "
+                     f"volatility window must build from live ticks: about "
+                     f"{need:.1f} hours of streaming before the first entry "
+                     f"is possible.")
 
     # ---------------------------------------------------------------- seeding
     def seed_bars(self, tf: str, bars):

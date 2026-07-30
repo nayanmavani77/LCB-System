@@ -127,7 +127,7 @@ def decode_tbbo_records(path):
                 L["bidsz"].append(rec.bid_sz_00)
                 L["asksz"].append(rec.ask_sz_00)
                 L["iid"].append(rec.instrument_id)
-    return pd.DataFrame({
+    df = pd.DataFrame({
         "ts": np.array(L["ts"], dtype="int64"),
         "price": np.array(L["price"], dtype="int64") / 1e9,
         "size": np.array(L["size"], dtype="int32"),
@@ -138,6 +138,31 @@ def decode_tbbo_records(path):
         "asksz": np.array(L["asksz"], dtype="int32"),
         "iid": np.array(L["iid"], dtype="int64"),
     })
+    return _drop_invalid_quotes(df, path)
+
+
+def _drop_invalid_quotes(df, path=""):
+    """Remove ticks whose quote is not a real two-sided market.
+
+    Databento encodes an UNDEFINED price as INT64_MAX, which becomes
+    ~9.223e9 after the 1e-9 scaling. Left in the cache such a row does real
+    damage: the PaperBroker fills against it (a fictional multi-billion
+    dollar trade in the equity curve) and any spread gate reading
+    ask - bid on it produces a number no cap can be compared against
+    meaningfully. Crossed and non-positive books are dropped for the same
+    reason. The count is PRINTED, not swallowed, so a tape with a lot of
+    them is visible rather than quietly cleaned."""
+    LIMIT = 1e7                     # $10m/oz - anything above is an encoding
+    ok = ((df.price > 0) & (df.price < LIMIT)
+          & (df.bid > 0) & (df.bid < LIMIT)
+          & (df.ask > 0) & (df.ask < LIMIT)
+          & (df.ask >= df.bid))
+    n_bad = int((~ok).sum())
+    if n_bad:
+        print(f"    dropped {n_bad:,} of {len(df):,} ticks with invalid "
+              f"quotes (undefined/crossed/non-positive)"
+              f"{' in ' + os.path.basename(path) if path else ''}")
+    return df[ok].reset_index(drop=True)
 
 
 def agg_bars(m1, minutes):

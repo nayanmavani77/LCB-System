@@ -578,6 +578,98 @@ def t_symbols():
         assert "core/symbols.py" in str(e)
 
 
+def t_snap_volume():
+    """Execution-side sizing. The engine's qty is a MULTIPLIER on --lots;
+    sending --lots regardless (the old bug) makes G-Trend trade 2x and
+    G-Trend-LowDD 3x the intended size on a real account."""
+    from core.mt5_broker import snap_volume
+    # lrev/retf: qty 1 -> the volume IS --lots
+    assert snap_volume(0.01, 1, 0.01, 100.0, 0.01) == (0.01, None)
+    # gtrend: 2 entries x 0.5 -> 0.005, below a 0.01 minimum -> refuse with
+    # the lots value that WOULD work, never silently round up to 0.01
+    vol, err = snap_volume(0.01, 0.5, 0.01, 100.0, 0.01)
+    assert vol is None and "below this broker's minimum" in err and "0.02" in err
+    assert snap_volume(0.02, 0.5, 0.01, 100.0, 0.01) == (0.01, None)
+    # snapping to volume_step, both directions
+    assert snap_volume(0.014, 1, 0.01, 100.0, 0.01) == (0.01, None)
+    assert snap_volume(0.016, 1, 0.01, 100.0, 0.01) == (0.02, None)
+    # no step declared -> pass the raw product through
+    assert snap_volume(0.03, 2, 0.01, 100.0, 0) == (0.06, None)
+    # over the broker maximum, and a non-positive request
+    assert snap_volume(60.0, 2, 0.01, 100.0, 0.01)[0] is None
+    assert "maximum" in snap_volume(60.0, 2, 0.01, 100.0, 0.01)[1]
+    assert snap_volume(0.01, 0, 0.01, 100.0, 0.01)[0] is None
+    # float noise must not push 3 x 0.1 off its step
+    assert snap_volume(0.1, 3, 0.01, 100.0, 0.01) == (0.3, None)
+
+
+def t_closed_bars():
+    """Live warmup must seed only bars the 1m data FULLY covers. A partial
+    last bin understates its true range (dragging an ATR stop down) AND is
+    rebuilt a second time by the live BarBuilder from ticks."""
+    import importlib.util
+    spec = importlib.util.spec_from_file_location(
+        "livemod", os.path.join(os.path.dirname(os.path.dirname(
+            os.path.abspath(__file__))), "run", "live.py"))
+    lv = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(lv)
+
+    def m1_frame(start, n):
+        idx = pd.date_range(start, periods=n, freq="1min", tz="UTC")
+        return pd.DataFrame({"open": np.arange(n, dtype="float64") + 100.0,
+                             "high": np.arange(n, dtype="float64") + 101.0,
+                             "low": np.arange(n, dtype="float64") + 99.0,
+                             "close": np.arange(n, dtype="float64") + 100.5,
+                             "volume": np.ones(n)}, index=idx)
+
+    # 18:00..18:46 inclusive = the 18:45 bin holds only 2 of its 15 minutes
+    m1 = m1_frame("2026-07-22 18:00", 47)
+    bars = lv.closed_bars(m1, 900)
+    got = [str(t) for t in bars.index]
+    assert got == ["2026-07-22 18:00:00+00:00", "2026-07-22 18:15:00+00:00",
+                   "2026-07-22 18:30:00+00:00"], got
+    # the old inline resample would have produced the partial 18:45 bar
+    assert len(bars) == 3
+    # aligned data: every bin is complete, none is dropped
+    m1 = m1_frame("2026-07-22 18:00", 45)
+    assert len(lv.closed_bars(m1, 900)) == 3
+    # a non-aligned START drops its partial first bin too
+    m1 = m1_frame("2026-07-22 18:07", 38)     # 18:07..18:44
+    assert [str(t) for t in lv.closed_bars(m1, 900).index] == \
+        ["2026-07-22 18:15:00+00:00", "2026-07-22 18:30:00+00:00"]
+    # empty in, empty out (no warmup data available)
+    assert not len(lv.closed_bars(pd.DataFrame(), 900))
+    # H1/H4 use the same rule
+    m1 = m1_frame("2026-07-22 12:00", 200)    # 12:00..15:19
+    assert [str(t) for t in lv.closed_bars(m1, 3600).index] == \
+        ["2026-07-22 12:00:00+00:00", "2026-07-22 13:00:00+00:00",
+         "2026-07-22 14:00:00+00:00"]
+
+    # Unit safety (core.data.ns_index): pandas 2/3 give date_range a
+    # MICROSECOND resolution, so a bare .view("int64") reads 1000x too small
+    # and every cutoff comparison silently passes everything. A us index and
+    # an ns index must produce the identical bar set.
+    m1 = m1_frame("2026-07-22 18:00", 47)
+    if hasattr(m1.index, "as_unit"):
+        as_ns = m1.copy()
+        as_ns.index = m1.index.as_unit("ns")
+        assert list(lv.closed_bars(as_ns, 900).index.astype(str)) == \
+            list(lv.closed_bars(m1, 900).index.astype(str)) and \
+            len(lv.closed_bars(as_ns, 900)) == 3
+
+    # ---- quote_ok: the INT64_MAX undefined-price guard ----
+    assert lv.quote_ok(4050.0, 4050.2, 4050.1)
+    UNDEF = (2 ** 63 - 1) / 1e9               # ~9.223e9, Databento's UNDEF
+    assert not lv.quote_ok(4050.0, UNDEF, 4050.1)
+    assert not lv.quote_ok(UNDEF, 4050.2, 4050.1)
+    assert not lv.quote_ok(4050.0, 4050.2, UNDEF)
+    assert not lv.quote_ok(4050.2, 4050.0, 4050.1)      # crossed
+    assert not lv.quote_ok(0.0, 4050.2, 4050.1)         # empty side
+    assert not lv.quote_ok(float("nan"), 4050.2, 4050.1)
+    assert not lv.quote_ok(4050.0, 4050.2, float("nan"))
+    assert lv.quote_ok(4000.0, 4300.0, 4100.0)          # wide but plausible
+
+
 def main():
     tests = [(k, v) for k, v in sorted(globals().items())
              if k.startswith("t_") and callable(v)]

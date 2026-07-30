@@ -65,6 +65,26 @@ PL (platinum), CL (WTI oil), NG (nat gas). Everything symbol-specific
 (Databento symbols, $/point, default spread gate, default cost, default MT5
 symbol) lives in that registry — the strategy code never changes per symbol.
 
+Prep now DROPS ticks whose quote is not a real two-sided market before it
+writes the cache (Databento encodes an undefined price as `INT64_MAX`, which
+becomes ~9.2 billion after scaling — the paper broker will happily fill
+against that and invent a multi-billion-point trade). It prints how many
+rows it dropped per file rather than cleaning silently.
+
+### 2c. `scripts/check_cache.py` — verify an ALREADY-BUILT cache
+
+A cache built before that filter existed can still hold bad rows, and a bad
+row does not look like an error, it looks like a trade. This checks the
+cache you already have without rebuilding anything: undefined/crossed/
+non-positive quotes, out-of-order ticks, bar timestamp duplicates and
+resolution, `high < low`, and whether each segment's ticks actually span the
+window the segment claims. Exit code 1 if anything needs attention.
+
+```
+python scripts/check_cache.py                 # GC
+python scripts/check_cache.py --symbol SI
+```
+
 ---
 
 ## 3. Backtest — `run/backtest.py`
@@ -274,7 +294,26 @@ Expert Advisors → "Allow algorithmic trading" enabled.
 | `--cost 0.2` | paper-mode commission+slippage per round turn (points) | per-symbol from `core/symbols.py` |
 | `--trades-csv F` | paper trade log path | `logs\paper_trades_<SYM>.csv` |
 | `--state-json F` | state snapshot path (written on exit) | `logs\state_<SYM>.json` |
+| `--mt5-max-spread 0.9` | spread cap **on the traded MT5 symbol**, in price units (`0` = off). The engines' own `--max-spread` gate reads the GC futures book; this one reads the book you actually pay. | same value as `--max-spread` |
+| `--max-signal-age 120` | refuse to send an order when the signal tick is older than N seconds (`0` = off). Stops a lagging stream from trading prices that no longer exist. | 120 |
+| `--stall-timeout 300` | force a reconnect when no tick arrives for N seconds (`0` = off). A half-open socket otherwise blocks forever with no error and no heartbeat. | 300 |
 | *strategy flags* | all of section 4 (`--rr`, `--sl-*`, `--set`, ...) | — |
+
+**Execution-side safety (`--broker mt5` only).** The engine's gates run on
+the SIGNAL instrument, so none of them can see the account you are trading.
+At connect time the MT5 adapter now hard-fails on: algorithmic trading
+disabled in the terminal, an account that does not allow trading or expert
+trading, and a `--lots × engine qty` product that is not a legal volume for
+the symbol (it tells you the `--lots` value that *would* work). It warns on
+a netting account, a symbol that is not in full-trading mode, and any
+pre-existing position carrying our magic number, and it prints a
+real-money banner with the balance. Per order it drops the signal — with a
+reason logged to `logs\mt5_signals_*.csv` — when the signal is stale, the
+MT5 spread is over the cap, the exposure cap is already met, the SL/TP
+distance is inside the broker's minimum stop distance, or the volume is
+illegal. After a fill it reads the position back and verifies SL/TP against
+the ACTUAL fill price; if the broker dropped them it sets them, and a
+position it cannot protect is closed rather than left naked.
 
 Examples:
 
